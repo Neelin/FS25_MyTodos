@@ -1,0 +1,702 @@
+--
+-- MyTodos
+--
+-- Bootstrap, Lifecycle-Hooks, HUD-Drawing, Settings-Persistenz und
+-- Maus-Drag. Field-Logik liegt in MyTodosFields.lua, Husbandry in
+-- MyTodosHusbandry.lua, Konsolenbefehle in MyTodosCommands.lua.
+--
+
+MyTodos = {}
+MyTodos.MOD_NAME = g_currentModName
+MyTodos.MOD_DIR = g_currentModDirectory
+MyTodos.VERSION = "0.0.1"
+
+MyTodos.SCAN_TIMEOUT_MS = 30000
+MyTodos.RESCAN_INTERVAL_MS = 5000
+
+MyTodos.HUD_DEFAULT_X = 0.5
+MyTodos.HUD_DEFAULT_Y = 0.97
+MyTodos.HUD_TEXT_SIZE = 0.012
+MyTodos.HUD_TITLE_SIZE = 0.014
+MyTodos.HUD_LINE_SPACING = 1.4
+MyTodos.HUD_PAD_X = 0.012
+MyTodos.HUD_PAD_Y = 0.005
+MyTodos.HUD_MIN_WIDTH = 0.16
+MyTodos.HUD_MAX_LINES = 12
+
+MyTodos.SETTINGS_X = 0.5
+MyTodos.SETTINGS_Y = 0.7
+MyTodos.SETTINGS_TEXT_SIZE = 0.014
+MyTodos.SETTINGS_TITLE_SIZE = 0.016
+MyTodos.SETTINGS_LINE_SPACING = 1.6
+MyTodos.SETTINGS_PAD_X = 0.018
+MyTodos.SETTINGS_PAD_Y = 0.008
+MyTodos.SETTINGS_MIN_WIDTH = 0.22
+
+MyTodos.HUD_BG_COLOR        = { 0,    0,    0,    0.75 }
+MyTodos.HUD_HEADER_COLOR    = { 0.20, 0.40, 0.05, 0.95 }
+MyTodos.HUD_EDIT_BG_COLOR   = { 1.0,  0.7,  0.0,  0.18 }
+MyTodos.HUD_TEXT_COLOR      = { 1,    1,    1,    1 }
+MyTodos.HUD_DIM_COLOR       = { 0.78, 0.78, 0.78, 1 }
+MyTodos.HUD_HEADER_TEXT     = { 1,    1,    1,    1 }
+MyTodos.HUD_EDIT_COLOR      = { 1.0,  0.85, 0.25, 1 }
+
+MyTodos.SETTINGS_FILENAME = "MyTodos.xml"
+
+-- Settings catalog. type ∈ {"bool", "percent"}. percent zyklisiert
+-- 5..95 in 5%-Schritten beim Klick (wrap-around). group setzt eine
+-- visuelle Sub-Header in den Settings-Dialog.
+MyTodos.PERCENT_STEP = 5
+MyTodos.PERCENT_MIN = 5
+MyTodos.PERCENT_MAX = 95
+
+MyTodos.SETTING_DEFS = {
+    { key = "hudMovable",  label = "HUD bewegbar", type = "bool",    default = false },
+    { key = "playerMouse", label = "Spielermaus",  type = "bool",    default = false },
+    -- Schwellwerte: Trigger wenn Wert unter/ueber dieser Marke ist.
+    -- "Futter unter 20%" heisst: Task erscheint sobald Trog unter 20% voll.
+    -- "Mist ueber 80%" heisst: Task erscheint sobald Lager ueber 80% voll.
+    { key = "foodThreshold",         label = "Futter unter",  type = "percent", default = 20, group = "Tiere" },
+    { key = "waterThreshold",        label = "Wasser unter",  type = "percent", default = 20, group = "Tiere" },
+    { key = "strawThreshold",        label = "Stroh unter",   type = "percent", default = 20, group = "Tiere" },
+    { key = "meadowThreshold",       label = "Weide unter",   type = "percent", default = 20, group = "Tiere" },
+    { key = "manureThreshold",       label = "Mist ueber",    type = "percent", default = 80, group = "Tiere" },
+    { key = "liquidManureThreshold", label = "Guelle ueber",  type = "percent", default = 80, group = "Tiere" },
+    { key = "milkThreshold",         label = "Milch ueber",   type = "percent", default = 80, group = "Tiere" },
+}
+
+-- Lifecycle ---------------------------------------------------------
+
+function MyTodos:onMissionLoaded(mission)
+    self.mission = mission
+    self.isServer = mission:getIsServer()
+    self.isClient = mission:getIsClient()
+
+    Logging.info("[MyTodos %s] mission loaded - server=%s client=%s",
+        self.VERSION, tostring(self.isServer), tostring(self.isClient))
+end
+
+function MyTodos:onMapLoaded()
+    self.farmId = nil
+    self.fieldTasks = {}
+    self.fieldHistory = {}
+    self.fieldOwnedCount = 0
+    self.husbandryTasks = {}
+    self.husbandryOwnedCount = 0
+    self.scanWaited = 0
+    self.timeSinceRescan = 0
+    self.firstScanDone = false
+
+    self.dragging = false
+    self.dragOffsetX = 0
+    self.dragOffsetY = 0
+    self.hudX = MyTodos.HUD_DEFAULT_X
+    self.hudY = MyTodos.HUD_DEFAULT_Y
+
+    self.settingsOpen = false
+    self.settings = {}
+    for _, def in ipairs(MyTodos.SETTING_DEFS) do
+        self.settings[def.key] = def.default
+    end
+
+    self:loadSettings()
+    self:setupGui()
+
+    if g_currentMission ~= nil and g_currentMission.addUpdateable ~= nil then
+        g_currentMission:addUpdateable(self)
+    end
+
+    self:registerActionEvents()
+    self:updateMouseCursor()
+end
+
+function MyTodos:setupGui()
+    if g_gui == nil or MyTodosSettingsScreen == nil then
+        Logging.warning("[MyTodos] cannot setup GUI: g_gui or MyTodosSettingsScreen missing")
+        return
+    end
+    if g_gui.guis ~= nil and g_gui.guis.MyTodosSettingsScreen ~= nil then
+        return
+    end
+    local xmlPath = MyTodos.MOD_DIR .. "config/MyTodosSettingsScreen.xml"
+    local screen = MyTodosSettingsScreen.new()
+    g_gui:loadGui(xmlPath, "MyTodosSettingsScreen", screen)
+    Logging.info("[MyTodos] settings GUI loaded from %s", xmlPath)
+end
+
+-- Update / scan -----------------------------------------------------
+
+function MyTodos:update(dt)
+    if self.farmId == nil then
+        self.scanWaited = self.scanWaited + dt
+        local farmId = self:getLocalFarmId()
+        local spectatorId = FarmManager.SPECTATOR_FARM_ID
+        if farmId ~= nil and farmId ~= spectatorId then
+            self.farmId = farmId
+            self:scanFields(true)
+        elseif self.scanWaited > MyTodos.SCAN_TIMEOUT_MS then
+            Logging.warning("[MyTodos] gave up waiting for local farmId after %.1fs",
+                self.scanWaited / 1000)
+            if g_currentMission ~= nil and g_currentMission.removeUpdateable ~= nil then
+                g_currentMission:removeUpdateable(self)
+            end
+        end
+        return
+    end
+
+    self.timeSinceRescan = self.timeSinceRescan + dt
+    if self.timeSinceRescan >= MyTodos.RESCAN_INTERVAL_MS then
+        self.timeSinceRescan = 0
+        self:scanFields(false)
+    end
+end
+
+function MyTodos:scanFields(verbose)
+    if not self.firstScanDone then
+        self.precisionFarming = self:detectPrecisionFarming()
+    end
+
+    local owned = self:collectOwnedFields(self.farmId)
+    self.fieldOwnedCount = #owned
+
+    -- Aggregat erzwingen, damit fieldState nicht hinterherhinkt.
+    for _, entry in ipairs(owned) do
+        if type(entry.field.updateState) == "function" then
+            pcall(entry.field.updateState, entry.field)
+        end
+    end
+
+    -- History updaten + Tasks ableiten; passive Felder rausfiltern
+    local tasks = {}
+    for _, entry in ipairs(owned) do
+        local fs = entry.field.fieldState
+        if fs ~= nil then
+            self:updateFieldHistory(entry.fieldId, fs)
+        end
+        local task = self:deriveFieldTask(entry.field, entry.fieldId)
+        if task ~= nil then
+            table.insert(tasks, { fieldId = entry.fieldId, task = task })
+        end
+    end
+    table.sort(tasks, function(a, b)
+        local an = tonumber(a.fieldId) or math.huge
+        local bn = tonumber(b.fieldId) or math.huge
+        if an ~= bn then return an < bn end
+        return tostring(a.fieldId) < tostring(b.fieldId)
+    end)
+    self.fieldTasks = tasks
+
+    if verbose then
+        Logging.info("[MyTodos] precision farming: %s",
+            self.precisionFarming ~= nil and self.precisionFarming or "no")
+        Logging.info("[MyTodos] plowing required: %s",
+            tostring(self:isPlowingRequired()))
+        Logging.info("[MyTodos] local farm=%d owns %d field(s), %d with tasks (after %.2fs)",
+            self.farmId, self.fieldOwnedCount, #tasks, self.scanWaited / 1000)
+        for _, t in ipairs(tasks) do
+            Logging.info("[MyTodos]   field %s -> %s", tostring(t.fieldId), t.task)
+        end
+        self.firstScanDone = true
+    end
+
+    -- Husbandries laufen im selben Polling-Tick
+    self:scanHusbandries(verbose)
+end
+
+-- Action events / settings dialog -----------------------------------
+
+function MyTodos:registerActionEvents()
+    if g_inputBinding == nil then return end
+    local success, eventId = g_inputBinding:registerActionEvent(
+        "MYTODOS_TOGGLE_SETTINGS",
+        self,
+        MyTodos.onActionToggleSettings,
+        false, true, false, true
+    )
+    if success and eventId ~= nil and g_inputBinding.setActionEventTextVisibility ~= nil then
+        g_inputBinding:setActionEventTextVisibility(eventId, false)
+    end
+end
+
+function MyTodos:onActionToggleSettings()
+    if g_gui == nil then return end
+    if g_gui.currentGuiName == "MyTodosSettingsScreen" then
+        g_gui:showGui("")
+    elseif g_gui.currentGui == nil then
+        g_gui:showGui("MyTodosSettingsScreen")
+    end
+end
+
+function MyTodos:onSettingsOpened()
+    self.settingsOpen = true
+    self.dragging = false
+end
+
+function MyTodos:onSettingsClosed()
+    self.settingsOpen = false
+    self:saveSettings()
+    self:updateMouseCursor()
+end
+
+function MyTodos:setSetting(key, value)
+    self.settings[key] = value
+    self:saveSettings()
+    self:updateMouseCursor()
+    Logging.info("[MyTodos] setting %s = %s", key, tostring(value))
+end
+
+function MyTodos:_settingDef(key)
+    for _, def in ipairs(MyTodos.SETTING_DEFS) do
+        if def.key == key then return def end
+    end
+    return nil
+end
+
+function MyTodos:toggleSetting(key)
+    self:setSetting(key, not self.settings[key])
+end
+
+function MyTodos:cyclePercentSetting(key)
+    local def = self:_settingDef(key)
+    if def == nil then return end
+    local cur = self.settings[key] or def.default or MyTodos.PERCENT_MIN
+    local nxt = cur + MyTodos.PERCENT_STEP
+    if nxt > MyTodos.PERCENT_MAX then nxt = MyTodos.PERCENT_MIN end
+    self:setSetting(key, nxt)
+end
+
+function MyTodos:updateMouseCursor()
+    local needCursor = self.settingsOpen
+        or self.settings.hudMovable
+        or self.settings.playerMouse
+    if g_inputBinding ~= nil and g_inputBinding.setShowMouseCursor ~= nil then
+        g_inputBinding:setShowMouseCursor(needCursor)
+    end
+end
+
+-- Mouse handling ----------------------------------------------------
+
+function MyTodos:mouseEvent(posX, posY, isDown, isUp, button)
+    -- BaseMission.mouseEvent fires only when no GUI is active, so this
+    -- nur fuer HUD-Drag (wenn "HUD bewegbar" an).
+    if not self.settings.hudMovable then return end
+
+    if button == Input.MOUSE_BUTTON_LEFT then
+        if isDown and not self.dragging then
+            if self:isMouseOverPanel(posX, posY) then
+                self.dragging = true
+                self.dragOffsetX = posX - self.hudX
+                self.dragOffsetY = posY - self.hudY
+            end
+        elseif isUp and self.dragging then
+            self.dragging = false
+            self:saveSettings()
+        end
+    end
+    if self.dragging then
+        self.hudX = posX - self.dragOffsetX
+        self.hudY = posY - self.dragOffsetY
+    end
+end
+
+function MyTodos:isMouseOverPanel(posX, posY)
+    local b = self.panelBounds
+    if b == nil then return false end
+    return posX >= b.left and posX <= b.left + b.width
+        and posY >= b.bottom and posY <= b.bottom + b.height
+end
+
+-- Drawing primitives ------------------------------------------------
+
+function MyTodos:ensureBgOverlay()
+    if self.bgOverlay == nil and g_baseUIFilename ~= nil then
+        self.bgOverlay = Overlay.new(g_baseUIFilename, 0, 0, 1, 1)
+        if g_colorBgUVs ~= nil then
+            self.bgOverlay:setUVs(g_colorBgUVs)
+        end
+    end
+end
+
+function MyTodos:drawPanel(left, bottom, width, height, color)
+    self:ensureBgOverlay()
+    if self.bgOverlay == nil then return end
+    self.bgOverlay:setColor(color[1], color[2], color[3], color[4])
+    self.bgOverlay:setPosition(left, bottom)
+    self.bgOverlay:setDimension(width, height)
+    self.bgOverlay:render()
+end
+
+-- HUD draw ----------------------------------------------------------
+
+function MyTodos:draw()
+    if not self.isClient then return end
+    if g_gui ~= nil and g_gui.currentGui ~= nil then return end
+    if self.fieldTasks == nil then return end
+
+    self:drawHud()
+end
+
+function MyTodos:drawHud()
+    local size = MyTodos.HUD_TEXT_SIZE
+    local titleSize = MyTodos.HUD_TITLE_SIZE
+    local lineH = size * MyTodos.HUD_LINE_SPACING
+    local padX = MyTodos.HUD_PAD_X
+    local padY = MyTodos.HUD_PAD_Y
+
+    local titleText = "MyTodos"
+    setTextBold(true)
+    local maxW = getTextWidth(titleSize, titleText)
+    setTextBold(false)
+
+    local fTasks = self.fieldTasks or {}
+    local hTasks = self.husbandryTasks or {}
+    local hasField = #fTasks > 0
+    local hasHusb = #hTasks > 0
+    local fieldOwned = self.fieldOwnedCount or 0
+    local husbOwned = self.husbandryOwnedCount or 0
+    local showSubHeaders = hasField and hasHusb
+
+    local rows = {}
+    local function addRow(text, color, isHeader)
+        table.insert(rows, { text = text, color = color, isHeader = isHeader })
+        maxW = math.max(maxW, getTextWidth(size, text))
+    end
+
+    if not hasField and not hasHusb then
+        local s
+        if fieldOwned == 0 and husbOwned == 0 then
+            s = "(keine eigenen Felder/Tiere)"
+        else
+            s = "(nichts zu tun)"
+        end
+        addRow(s, MyTodos.HUD_DIM_COLOR, false)
+    else
+        local lineBudget = MyTodos.HUD_MAX_LINES
+
+        if hasField then
+            if showSubHeaders then
+                addRow("── Felder ──", MyTodos.HUD_DIM_COLOR, true)
+                lineBudget = lineBudget - 1
+            end
+            local shown = 0
+            for _, t in ipairs(fTasks) do
+                if shown >= lineBudget then
+                    addRow(string.format("(+%d weitere)", #fTasks - shown),
+                        MyTodos.HUD_DIM_COLOR, false)
+                    break
+                end
+                addRow(string.format("F%s  %s", tostring(t.fieldId), t.task),
+                    MyTodos.HUD_TEXT_COLOR, false)
+                shown = shown + 1
+                lineBudget = lineBudget - 1
+            end
+        end
+
+        if hasHusb then
+            if showSubHeaders then
+                addRow("── Tiere ──", MyTodos.HUD_DIM_COLOR, true)
+                lineBudget = lineBudget - 1
+            end
+            local shown = 0
+            for _, t in ipairs(hTasks) do
+                if lineBudget <= 0 then
+                    addRow(string.format("(+%d weitere)", #hTasks - shown),
+                        MyTodos.HUD_DIM_COLOR, false)
+                    break
+                end
+                addRow(t.task, MyTodos.HUD_TEXT_COLOR, false)
+                shown = shown + 1
+                lineBudget = lineBudget - 1
+            end
+        end
+    end
+
+    local panelW = math.max(MyTodos.HUD_MIN_WIDTH, maxW + 2 * padX)
+    local headerH = titleSize + 2 * padY
+    local bodyH = padY + #rows * lineH + padY
+    local totalH = headerH + bodyH
+
+    local panelLeft = self.hudX - panelW / 2
+    local panelTop = self.hudY
+    local panelBottom = panelTop - totalH
+
+    self.panelBounds = {
+        left = panelLeft,
+        bottom = panelBottom,
+        width = panelW,
+        height = totalH,
+    }
+
+    self:drawPanel(panelLeft, panelTop - headerH, panelW, headerH, MyTodos.HUD_HEADER_COLOR)
+    self:drawPanel(panelLeft, panelBottom, panelW, bodyH, MyTodos.HUD_BG_COLOR)
+    if self.settings.hudMovable then
+        self:drawPanel(panelLeft, panelBottom, panelW, totalH, MyTodos.HUD_EDIT_BG_COLOR)
+    end
+
+    setTextAlignment(RenderText.ALIGN_CENTER)
+    setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_TOP)
+
+    setTextBold(true)
+    setTextColor(MyTodos.HUD_HEADER_TEXT[1], MyTodos.HUD_HEADER_TEXT[2],
+                 MyTodos.HUD_HEADER_TEXT[3], MyTodos.HUD_HEADER_TEXT[4])
+    renderText(self.hudX, panelTop - padY, titleSize, titleText)
+    setTextBold(false)
+
+    local y = panelTop - headerH - padY
+    for _, row in ipairs(rows) do
+        local c = row.color
+        setTextColor(c[1], c[2], c[3], c[4])
+        if row.isHeader then setTextBold(true) end
+        renderText(self.hudX, y, size, row.text)
+        if row.isHeader then setTextBold(false) end
+        y = y - lineH
+    end
+
+    setTextAlignment(RenderText.ALIGN_LEFT)
+    setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_BASELINE)
+    setTextColor(1, 1, 1, 1)
+end
+
+function MyTodos:_settingRowText(def)
+    local typ = def.type or "bool"
+    if typ == "bool" then
+        local mark = self.settings[def.key] and "[X]" or "[ ]"
+        return string.format("%s  %s", mark, def.label)
+    elseif typ == "percent" then
+        local v = self.settings[def.key] or def.default or MyTodos.PERCENT_MIN
+        return string.format("[ %d%% ]  %s", v, def.label)
+    end
+    return def.label
+end
+
+-- Baut die Render-Liste fuer das Settings-Panel. Group-Wechsel wird in
+-- eine Sub-Header-Zeile uebersetzt; sonst pro Setting eine Click-Zeile.
+function MyTodos:_buildSettingRows()
+    local rows = {}
+    local lastGroup = nil
+    for _, def in ipairs(MyTodos.SETTING_DEFS) do
+        if def.group ~= lastGroup then
+            if def.group ~= nil then
+                table.insert(rows, {
+                    isHeader = true,
+                    text = "── " .. def.group .. " ──",
+                })
+            end
+            lastGroup = def.group
+        end
+        table.insert(rows, {
+            key = def.key,
+            type = def.type or "bool",
+            text = self:_settingRowText(def),
+        })
+    end
+    return rows
+end
+
+function MyTodos:drawSettingsContent()
+    local size = MyTodos.SETTINGS_TEXT_SIZE
+    local titleSize = MyTodos.SETTINGS_TITLE_SIZE
+    local lineH = size * MyTodos.SETTINGS_LINE_SPACING
+    local padX = MyTodos.SETTINGS_PAD_X
+    local padY = MyTodos.SETTINGS_PAD_Y
+
+    local titleText = "MyTodos - Einstellungen"
+    setTextBold(true)
+    local maxW = getTextWidth(titleSize, titleText)
+    setTextBold(false)
+
+    local rowTexts = self:_buildSettingRows()
+    for _, row in ipairs(rowTexts) do
+        maxW = math.max(maxW, getTextWidth(size, row.text))
+    end
+    local closeText = "[ Schliessen ]"
+    maxW = math.max(maxW, getTextWidth(size, closeText))
+
+    local panelW = math.max(MyTodos.SETTINGS_MIN_WIDTH, maxW + 2 * padX)
+    local headerH = titleSize + 2 * padY
+    local closeRowH = lineH
+    local bodyH = padY + #rowTexts * lineH + padY + closeRowH + padY
+    local totalH = headerH + bodyH
+
+    local panelLeft = MyTodos.SETTINGS_X - panelW / 2
+    local panelTop = MyTodos.SETTINGS_Y
+    local panelBottom = panelTop - totalH
+
+    self:drawPanel(panelLeft, panelTop - headerH, panelW, headerH, MyTodos.HUD_HEADER_COLOR)
+    self:drawPanel(panelLeft, panelBottom, panelW, bodyH, MyTodos.HUD_BG_COLOR)
+
+    setTextAlignment(RenderText.ALIGN_CENTER)
+    setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_TOP)
+
+    setTextBold(true)
+    setTextColor(MyTodos.HUD_HEADER_TEXT[1], MyTodos.HUD_HEADER_TEXT[2],
+                 MyTodos.HUD_HEADER_TEXT[3], MyTodos.HUD_HEADER_TEXT[4])
+    renderText(MyTodos.SETTINGS_X, panelTop - padY, titleSize, titleText)
+    setTextBold(false)
+
+    local y = panelTop - headerH - padY
+    local rowBounds = {}
+    local textLeft = panelLeft + padX
+    for _, row in ipairs(rowTexts) do
+        if row.isHeader then
+            setTextAlignment(RenderText.ALIGN_CENTER)
+            setTextBold(true)
+            setTextColor(MyTodos.HUD_DIM_COLOR[1], MyTodos.HUD_DIM_COLOR[2],
+                         MyTodos.HUD_DIM_COLOR[3], MyTodos.HUD_DIM_COLOR[4])
+            renderText(MyTodos.SETTINGS_X, y, size, row.text)
+            setTextBold(false)
+        else
+            setTextAlignment(RenderText.ALIGN_LEFT)
+            setTextColor(MyTodos.HUD_TEXT_COLOR[1], MyTodos.HUD_TEXT_COLOR[2],
+                         MyTodos.HUD_TEXT_COLOR[3], MyTodos.HUD_TEXT_COLOR[4])
+            renderText(textLeft, y, size, row.text)
+            table.insert(rowBounds, {
+                key = row.key,
+                type = row.type,
+                left = panelLeft,
+                bottom = y - lineH,
+                width = panelW,
+                height = lineH,
+            })
+        end
+        y = y - lineH
+    end
+
+    -- Schliessen-Button unten zentriert
+    setTextAlignment(RenderText.ALIGN_CENTER)
+    setTextColor(MyTodos.HUD_EDIT_COLOR[1], MyTodos.HUD_EDIT_COLOR[2],
+                 MyTodos.HUD_EDIT_COLOR[3], MyTodos.HUD_EDIT_COLOR[4])
+    y = y - padY
+    renderText(MyTodos.SETTINGS_X, y, size, closeText)
+    table.insert(rowBounds, {
+        key = "__close__",
+        left = panelLeft,
+        bottom = y - lineH,
+        width = panelW,
+        height = lineH,
+    })
+
+    self.settingsRowBounds = rowBounds
+
+    setTextAlignment(RenderText.ALIGN_LEFT)
+    setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_BASELINE)
+    setTextColor(1, 1, 1, 1)
+end
+
+function MyTodos:handleSettingsClick(posX, posY)
+    local rows = self.settingsRowBounds
+    if rows == nil then return false end
+    for _, row in ipairs(rows) do
+        if posX >= row.left and posX <= row.left + row.width
+                and posY >= row.bottom and posY <= row.bottom + row.height then
+            if row.key == "__close__" then
+                if g_gui ~= nil and g_gui.showGui ~= nil then
+                    g_gui:showGui("")
+                end
+            elseif row.type == "percent" then
+                self:cyclePercentSetting(row.key)
+            else
+                self:toggleSetting(row.key)
+            end
+            return true
+        end
+    end
+    return false
+end
+
+-- Settings persistence ----------------------------------------------
+
+function MyTodos:getSettingsPath()
+    return getUserProfileAppPath() .. "modSettings/" .. MyTodos.SETTINGS_FILENAME
+end
+
+function MyTodos:loadSettings()
+    local path = self:getSettingsPath()
+    if not fileExists(path) then
+        return
+    end
+    local xmlFile = loadXMLFile("MyTodosSettings", path)
+    if xmlFile == nil or xmlFile == 0 then return end
+    local x = getXMLFloat(xmlFile, "myTodos.hud#x")
+    local y = getXMLFloat(xmlFile, "myTodos.hud#y")
+    if x ~= nil then self.hudX = x end
+    if y ~= nil then self.hudY = y end
+    for _, def in ipairs(MyTodos.SETTING_DEFS) do
+        local p = "myTodos.settings#" .. def.key
+        local typ = def.type or "bool"
+        if typ == "bool" then
+            local v = getXMLBool(xmlFile, p)
+            if v ~= nil then self.settings[def.key] = v end
+        elseif typ == "percent" then
+            local v = getXMLInt(xmlFile, p)
+            if v ~= nil then self.settings[def.key] = v end
+        end
+    end
+    delete(xmlFile)
+    Logging.info("[MyTodos] loaded settings: hud x=%.3f y=%.3f movable=%s mouse=%s",
+        self.hudX, self.hudY,
+        tostring(self.settings.hudMovable), tostring(self.settings.playerMouse))
+end
+
+function MyTodos:saveSettings()
+    createFolder(getUserProfileAppPath() .. "modSettings")
+    local path = self:getSettingsPath()
+    local xmlFile = createXMLFile("MyTodosSettings", path, "myTodos")
+    if xmlFile == nil or xmlFile == 0 then
+        Logging.warning("[MyTodos] could not create settings file at %s", path)
+        return
+    end
+    setXMLFloat(xmlFile, "myTodos.hud#x", self.hudX)
+    setXMLFloat(xmlFile, "myTodos.hud#y", self.hudY)
+    for _, def in ipairs(MyTodos.SETTING_DEFS) do
+        local p = "myTodos.settings#" .. def.key
+        local typ = def.type or "bool"
+        if typ == "bool" then
+            setXMLBool(xmlFile, p, self.settings[def.key] and true or false)
+        elseif typ == "percent" then
+            setXMLInt(xmlFile, p, self.settings[def.key] or def.default or MyTodos.PERCENT_MIN)
+        end
+    end
+    saveXMLFile(xmlFile)
+    delete(xmlFile)
+end
+
+-- Helpers (von allen Modulen genutzt) -------------------------------
+
+function MyTodos:dumpKeys(label, t)
+    if t == nil then
+        Logging.info("[MyTodos] %s: <nil>", label)
+        return
+    end
+    local keys = {}
+    for k, v in pairs(t) do
+        local desc
+        local tv = type(v)
+        if tv == "number" or tv == "boolean" or tv == "string" then
+            desc = string.format("%s=%s", tostring(k), tostring(v))
+        else
+            desc = string.format("%s=<%s>", tostring(k), tv)
+        end
+        table.insert(keys, desc)
+    end
+    table.sort(keys)
+    Logging.info("[MyTodos] %s: %s", label, table.concat(keys, ", "))
+end
+
+-- Hooks -------------------------------------------------------------
+
+Mission00.load = Utils.appendedFunction(Mission00.load, function(mission)
+    MyTodos:onMissionLoaded(mission)
+end)
+
+BaseMission.loadMapFinished = Utils.appendedFunction(BaseMission.loadMapFinished, function(mission)
+    MyTodos:onMapLoaded()
+end)
+
+BaseMission.draw = Utils.appendedFunction(BaseMission.draw, function(mission)
+    MyTodos:draw()
+end)
+
+BaseMission.mouseEvent = Utils.appendedFunction(BaseMission.mouseEvent, function(mission, posX, posY, isDown, isUp, button)
+    MyTodos:mouseEvent(posX, posY, isDown, isUp, button)
+end)

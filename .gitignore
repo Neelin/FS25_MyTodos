@@ -1,0 +1,19 @@
+# Persönliche Claude-Code-Einstellungen (Allowlists etc.)
+.claude/settings.local.json
+
+# Windows-Müll
+Thumbs.db
+desktop.ini
+*.lnk
+
+# macOS-Müll falls jemand auf nem Mac dran arbeitet
+.DS_Store
+
+# Editor/Tool-temp-Files
+*.bak
+*.tmp
+*.swp
+*~
+
+# FS25 erzeugt manchmal lokale Log-Files im Mod-Ordner beim Testen
+*.log

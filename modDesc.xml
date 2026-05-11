@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<modDesc descVersion="90">
+    <author>Tobias</author>
+    <version>0.0.1</version>
+
+    <title>
+        <en>MyTodos</en>
+        <de>MyTodos</de>
+    </title>
+
+    <description>
+        <en><![CDATA[Always-visible HUD listing the next pending tasks on your fields and animal husbandries.]]></en>
+        <de><![CDATA[Dauerhaft sichtbares HUD mit den als nächstes anstehenden Aufgaben auf deinen Feldern und bei deinen Tieren.]]></de>
+    </description>
+
+    <iconFilename>icon.png</iconFilename>
+    <multiplayer supported="true"/>
+
+    <extraSourceFiles>
+        <sourceFile filename="scripts/MyTodosSettingsScreen.lua"/>
+        <sourceFile filename="scripts/MyTodos.lua"/>
+        <sourceFile filename="scripts/MyTodosFields.lua"/>
+        <sourceFile filename="scripts/MyTodosHusbandry.lua"/>
+        <sourceFile filename="scripts/MyTodosCommands.lua"/>
+    </extraSourceFiles>
+
+    <actions>
+        <action name="MYTODOS_TOGGLE_SETTINGS"/>
+    </actions>
+
+    <inputBinding>
+        <actionBinding action="MYTODOS_TOGGLE_SETTINGS">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_lalt KEY_m"/>
+        </actionBinding>
+    </inputBinding>
+</modDesc>
