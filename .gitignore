@@ -17,3 +17,8 @@ desktop.ini
 
 # FS25 erzeugt manchmal lokale Log-Files im Mod-Ordner beim Testen
 *.log
+
+# Probe-Output-Dumps die wir uns gelegentlich ins Repo werfen
+# zum Diagnose-Lesen -- bleiben lokal, kein Repo-Inhalt
+*_dump.txt
+*_probe.txt

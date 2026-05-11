@@ -39,18 +39,31 @@ MyTodos.WEED_MIN_PIXELS = 50
 MyTodos.WEED_MIN_FRACTION = 0.01
 MyTodos.WEED_TOTAL_MIN_FACTOR = 0.05
 
--- Precision-Farming pH-Schwellen. Wenn PF geladen ist, ersetzt das den
--- Vanilla-Kalken-Task. pH wird via pHMap im worldPos-Spot-Sample am
--- Feld-Mittelpunkt gelesen (Polygon-Sampling waere genauer, aber dazu
--- muessten wir an pHMap.densityMapId rankommen -- ValueMap ist in
--- _gameSource ge-scrubbed, dazu spaeter mehr).
+-- Precision-Farming "Kalk"-Schwellen. Mit PF ersetzen wir den
+-- Vanilla-Kalken-Task. Target-pH haengt vom DOMINANTEN BODENTYP des
+-- Feldes ab (NICHT von der Frucht -- die Frucht beeinflusst nur den
+-- Yield via yieldCurve, nicht den optimalen pH).
 --
--- pH-Skala in FS25 ist typischerweise 4.0-9.0, Optimum 6.5-7.0.
--- Wir triggern "Kalk"-Task wenn pH unter PH_TARGET_MIN faellt.
-MyTodos.PH_TARGET_MIN = 6.5
--- pH-Werte unter dieser Schwelle gelten als "stark sauer" und kriegen
--- ein deutlicheres Label.
-MyTodos.PH_VERY_ACIDIC = 5.5
+-- Target-Werte kommen aus `pHMap.valueTransformations`:
+--   Lehmiger Sand   -> internal 13 -> pH 6.00
+--   Sandiger Lehm   -> internal 17 -> pH 6.50
+--   Lehm            -> internal 19 -> pH 6.75
+--   Schluffiger Ton -> internal 21 -> pH 7.00
+-- plus `regularOffset` als Tolerenzbereich (1.5 internal = 0.19 pH bei
+-- Sand/Sandiger Lehm; 0.5 internal = 0.06 pH bei Lehm/Schluffiger Ton).
+-- Trigger fuer Task: aktueller avg-pH < (target - regularOffset).
+--
+-- Wenn die Differenz groesser als PH_HEAVY_GAP_STATES Internal-States
+-- ist (-> ca. 80% Yield laut yieldCurve), schaerfen wir das Label auf
+-- "stark sauer".
+MyTodos.PH_HEAVY_GAP_STATES = 4
+-- Anzahl Bodenarten (Stand FS25 2026: 4). soilMap.soilTypes hat genau
+-- diese vielen Eintraege, Indizes 1..N.
+MyTodos.SOIL_NUM_TYPES = 4
+-- Mindest-Pixel + -Anteil damit eine Bodenart als "dominant" zaehlt.
+-- Gleiche Konvention wie Stein-/Weed-Sampler.
+MyTodos.SOIL_MIN_PIXELS = 50
+MyTodos.SOIL_MIN_FRACTION = 0.05
 
 -- Discovery --------------------------------------------------------
 
@@ -490,8 +503,23 @@ function MyTodos:initPhSampler()
     return true
 end
 
--- Polygon-Average ueber das Feld. Konvertiert internal -> real pH via
--- pHMap-Methode wenn vorhanden, sonst via empirischer Formel.
+-- Konvertiert internal pH-value -> real pH. Benutzt bevorzugt die
+-- pHMap-Methode, sonst die empirische Formel aus dem Probe-Dump.
+function MyTodos:_phInternalToReal(internalValue)
+    local m = self.phMap
+    if m == nil then return nil end
+    if type(m.getPhValueFromInternalValue) == "function" then
+        local ok, real = pcall(m.getPhValueFromInternalValue, m, internalValue)
+        if ok and type(real) == "number" then return real end
+    end
+    local step = m.pHValuePerState or 0.125
+    return 4.50 + internalValue * step
+end
+
+-- Polygon-Average ueber das Feld. Liefert ein Tupel {realPh, internal}
+-- oder nil. Internal-Repraesentation brauchen wir um mit den
+-- valueTransformations-Schwellen vergleichen zu koennen (die sind
+-- ebenfalls in internal-state-Einheiten).
 function MyTodos:samplePhForField(field)
     if not self:initPhSampler() then return nil end
     if type(field.polygonPoints) ~= "table" or #field.polygonPoints == 0 then
@@ -506,26 +534,138 @@ function MyTodos:samplePhForField(field)
     -- Tiles haben internal=0). Schwellwert empirisch: bei gekauften Maps
     -- liegt der Average typisch bei 5-25 (entspricht pH 5-7.5).
     if avgInternal < 1 then return nil end
-
-    local m = self.phMap
-    if type(m.getPhValueFromInternalValue) == "function" then
-        local ok, real = pcall(m.getPhValueFromInternalValue, m, avgInternal)
-        if ok and type(real) == "number" then return real end
-    end
-    -- Fallback: aus den Probe-Dump-Daten abgeleitet.
-    local step = m.pHValuePerState or 0.125
-    return 4.50 + avgInternal * step
+    local realPh = self:_phInternalToReal(avgInternal)
+    if realPh == nil then return nil end
+    return { real = realPh, internal = avgInternal }
 end
 
--- Liefert "Kalk: pH X.X (qualifier)"-Label oder nil wenn nichts zu tun.
--- nil heisst auch: PF nicht aktiv / Soil-Map nicht gekauft / pH okay.
+-- Soil-Sampler (Precision Farming) ---------------------------------
+--
+-- Bestimmt die DOMINANTE Bodenart eines Feldes via Polygon-Sampling auf
+-- soilMap.bitVectorMap. soilMap hat 3 Channels insgesamt
+-- (typeFirstChannel=0, typeNumChannels=2 fuer den Typ-Anteil = 4 Werte,
+-- der dritte Channel ist Cover/Sampling-State). Werte 1..4 mappen direkt
+-- auf soilMap.soilTypes[1..4]. Value 0 = uninitialisiert.
+
+function MyTodos:initSoilSampler()
+    if self.soilSamplerReady ~= nil then return self.soilMod ~= nil end
+    local pf
+    local pHMap = self:findPfPHMap()
+    if pHMap == nil then return false end
+    pf = pHMap.pfModule
+    local soilMap = pf and pf.soilMap
+    if soilMap == nil then
+        -- Fallback: pHMap hat eine Backref auf soilMap
+        soilMap = pHMap.soilMap
+    end
+    if soilMap == nil then
+        return false
+    end
+    self.soilSamplerReady = true
+    self.soilMap = soilMap
+
+    if soilMap.bitVectorMap == nil then
+        Logging.info("[MyTodos] soil sampler: soilMap.bitVectorMap nil")
+        return false
+    end
+    if DensityMapModifier == nil or DensityMapFilter == nil
+            or g_currentMission.terrainRootNode == nil then
+        return false
+    end
+    local firstCh = soilMap.typeFirstChannel or 0
+    local numCh = soilMap.typeNumChannels or 2
+    local ok, mod = pcall(DensityMapModifier.new, soilMap.bitVectorMap,
+        firstCh, numCh, g_currentMission.terrainRootNode)
+    if not ok or mod == nil then
+        Logging.warning("[MyTodos] soil sampler: DensityMapModifier.new failed: %s", tostring(mod))
+        return false
+    end
+    self.soilMod = mod
+    self.soilFilters = {}
+    for v = 1, MyTodos.SOIL_NUM_TYPES do
+        local f = DensityMapFilter.new(mod)
+        f:setValueCompareParams(DensityValueCompareType.EQUAL, v)
+        self.soilFilters[v] = f
+    end
+    Logging.info("[MyTodos] soil sampler ready (bitVectorMap=%s firstCh=%d numCh=%d)",
+        tostring(soilMap.bitVectorMap), firstCh, numCh)
+    return true
+end
+
+-- Liefert den dominanten Bodentyp-Index (1..N) oder nil.
+function MyTodos:sampleDominantSoilType(field)
+    if not self:initSoilSampler() then return nil end
+    if type(field.polygonPoints) ~= "table" or #field.polygonPoints == 0 then
+        return nil
+    end
+    self:applyFieldPolygon(self.soilMod, field)
+    local _, _, totalArea = self.soilMod:executeGet()
+    if totalArea == nil or totalArea < 1 then return nil end
+    local threshold = math.max(
+        MyTodos.SOIL_MIN_PIXELS,
+        math.floor(totalArea * MyTodos.SOIL_MIN_FRACTION)
+    )
+    local bestIdx, bestArea = nil, 0
+    for v = 1, MyTodos.SOIL_NUM_TYPES do
+        local _, area, _ = self.soilMod:executeGet(self.soilFilters[v])
+        if area ~= nil and area > bestArea and area >= threshold then
+            bestArea = area
+            bestIdx = v
+        end
+    end
+    return bestIdx
+end
+
+-- Sucht in pHMap.valueTransformations den Eintrag fuer einen Bodentyp-
+-- Index. Liefert {optimalValue, regularOffset} oder nil.
+function MyTodos:lookupPhTransformForSoil(soilIdx)
+    if self.phMap == nil then return nil end
+    local transforms = self.phMap.valueTransformations
+    if type(transforms) ~= "table" then return nil end
+    for _, t in ipairs(transforms) do
+        if t.soilTypeIndex == soilIdx then
+            return {
+                optimalValue = t.optimalValue,
+                regularOffset = t.regularOffset or 0,
+            }
+        end
+    end
+    return nil
+end
+
+function MyTodos:soilTypeName(soilIdx)
+    local sm = self.soilMap
+    if sm == nil or type(sm.soilTypes) ~= "table" then return nil end
+    local entry = sm.soilTypes[soilIdx]
+    if entry == nil then return nil end
+    return entry.name
+end
+
+-- Liefert "Kalk: pH X.X / Y.Y (Bodenname[, stark sauer])"-Label oder nil
+-- wenn nichts zu tun (PF inaktiv, Soil-Map nicht gekauft, pH okay).
+--
+-- Trigger-Logik exakt wie PF's eigener Auto-Apply:
+--   triggerInternal = optimalValue - regularOffset
+--   wenn avg < trigger -> Kalk noetig
+-- "stark sauer" wenn avg <= trigger - PH_HEAVY_GAP_STATES (~ 80% Yield).
 function MyTodos:limeTaskPf(field)
     if not self:isPfActive() then return nil end
     local ph = self:samplePhForField(field)
-    if ph == nil or ph < 1.0 then return nil end
-    if ph >= MyTodos.PH_TARGET_MIN then return nil end
-    local qualifier = (ph < MyTodos.PH_VERY_ACIDIC) and "stark sauer" or "sauer"
-    return string.format("Kalk: pH %.1f (%s)", ph, qualifier)
+    if ph == nil then return nil end
+    local soilIdx = self:sampleDominantSoilType(field)
+    if soilIdx == nil then return nil end
+    local transform = self:lookupPhTransformForSoil(soilIdx)
+    if transform == nil then return nil end
+    local triggerInternal = transform.optimalValue - transform.regularOffset
+    if ph.internal >= triggerInternal then return nil end
+    local targetReal = self:_phInternalToReal(transform.optimalValue) or 0
+    local soilName = self:soilTypeName(soilIdx) or "?"
+    local extra = ""
+    if ph.internal <= triggerInternal - MyTodos.PH_HEAVY_GAP_STATES then
+        extra = ", stark sauer"
+    end
+    return string.format("Kalk: pH %.1f / %.1f (%s%s)",
+        ph.real, targetReal, soilName, extra)
 end
 
 -- Field history (Duengen-Lockout) ----------------------------------

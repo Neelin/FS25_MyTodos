@@ -265,28 +265,59 @@ Die zentrale PF-Instanz erreicht man indirekt via `pHMap.pfModule`. Auch `g_modM
 - `bitVectorMapPHInitMask` — separate Map: 1=initialisiert (Soil-Map gekauft), 0=uninitialisiert. Aktuell nicht zum Filtern genutzt (siehe TODOs)
 - `pfModule` — Backreferenz auf die zentrale PF-Instanz (so kommen wir an nitrogenMap, soilMap, ...)
 - Methode `pHMap:getPhValueFromInternalValue(internalValue)` — offizielle Konversion, bevorzugen wir, sonst Fallback `4.50 + internal * pHValuePerState`
+- `pHMap.valueTransformations` — **die Target-Lookup-Tabelle**, pro Bodentyp ein Eintrag:
+  ```
+  [1] = { soilTypeIndex=1, optimalValue=13, regularOffset=1.5, ...}  -> Lehmiger Sand pH 6.00
+  [2] = { soilTypeIndex=2, optimalValue=17, regularOffset=1.5, ...}  -> Sandiger Lehm pH 6.50
+  [3] = { soilTypeIndex=3, optimalValue=19, regularOffset=0.5, ...}  -> Lehm           pH 6.75
+  [4] = { soilTypeIndex=4, optimalValue=21, regularOffset=0.5, ...}  -> Schluffiger Ton pH 7.00
+  ```
+  **Frucht spielt keine Rolle**: das Optimum haengt nur vom Boden ab. Die Frucht beeinflusst ueber `pHMap.yieldCurve` den Ertrag (Yield-Loss pro internal-state-Abstand vom Optimum), aber nicht den Ziel-pH.
+- `pHMap.limeUsage.usagePerState=730` — kg Kalk pro state change (Info, fuer Task nicht gebraucht).
 
-**Polygon-Sampling** (`MyTodos:samplePhForField`):
+**soilMap-Attribute**:
+- `bitVectorMap=<id>`, `typeFirstChannel=0`, `typeNumChannels=2` — 4 Bodentypen (Werte 1..4, 0=uninitialisiert)
+- `soilMap.soilTypes[1..4]` — `{ name, yieldPotential, color, colorBlind }` pro Bodenart:
+  ```
+  [1] Lehmiger Sand   (yieldPotential 0.80)
+  [2] Sandiger Lehm   (yieldPotential 1.00)
+  [3] Lehm            (yieldPotential 1.25)
+  [4] Schluffiger Ton (yieldPotential 0.90)
+  ```
+
+**Polygon-Sampling pH** (`MyTodos:samplePhForField`):
 - `DensityMapModifier.new(pHMap.bitVectorMap, firstChannel, numChannels, terrainRootNode)`
 - `applyFieldPolygon` (Helper, gleicher Code wie Weed/Stone-Sampler)
 - `mod:executeGet()` ohne Filter -> `sum, pixelArea, totalArea`
 - `avgInternal = sum / pixelArea`. Bei `avgInternal < 1` -> "Soil-Map nicht gekauft" -> nil
 - Konvertierung zu real-pH via `pHMap:getPhValueFromInternalValue(avg)`
+- Liefert `{ real=pH, internal=avgInternal }` damit Vergleiche in beiden Einheiten moeglich sind.
+
+**Soil-Sampler** (`MyTodos:initSoilSampler`, `sampleDominantSoilType`):
+- Schnappt `soilMap` via `pHMap.pfModule.soilMap` (oder `pHMap.soilMap` als Fallback)
+- DensityMapModifier auf `soilMap.bitVectorMap` mit `typeFirstChannel/typeNumChannels`
+- Polygon-Sample mit `EQUAL`-Filtern fuer Werte 1..N, ermittelt dominanten Boden
+- Schwelle `max(50px, 5% Feldflaeche)` damit Bodenart als "dominant" zaehlt
+- v1 dominant-soil-Approach (statt Pixel-weisem Target) -- ein gemischtes Feld bekommt den Target des haeufigsten Bodens
 
 **Label-Logik** (`limeTaskPf`):
-- pH >= `PH_TARGET_MIN` (6.5) -> nil (kein Task, pH okay)
-- pH < `PH_VERY_ACIDIC` (5.5) -> `"Kalk: pH 4.8 (stark sauer)"`
-- sonst -> `"Kalk: pH 5.9 (sauer)"`
+- pH-Polygon-Average lesen
+- Dominante Bodenart bestimmen
+- Target = `valueTransformations[soilIdx].optimalValue` (-> via getPhValueFromInternalValue auf real-pH)
+- Trigger = `optimalValue - regularOffset` (in internal states; entspricht ~0.06-0.19 pH Toleranz je nach Boden) -- exakt wie PF's Auto-Apply trigger
+- Bei `avg.internal < trigger` -> Task `"Kalk: pH 5.8 / 6.5 (Sandiger Lehm)"`
+- Wenn `avg.internal <= trigger - PH_HEAVY_GAP_STATES` (4 states ~ 0.5 pH, entspricht ~80% Yield laut yieldCurve) -> Suffix `", stark sauer"` in der Klammer
 
-**In `deriveParallelVanilla`**: bei aktivem PF nur `limeTaskPf`, ohne PF nur Vanilla `limeLevel == 0 -> "Kalken"`. Kein Misch-Modus, weil Vanilla-`limeLevel` unter PF andere Semantik hat (boolean vs. pH-Skala).
+**In `deriveParallelVanilla`**: bei aktivem PF nur `limeTaskPf`, ohne PF nur Vanilla `limeLevel == 0 -> "Kalken"`. Kein Misch-Modus.
 
 **Schwellen-Konstanten** oben in `MyTodosFields.lua`:
-- `PH_TARGET_MIN = 6.5`
-- `PH_VERY_ACIDIC = 5.5`
+- `PH_HEAVY_GAP_STATES = 4` — Internal-State-Abstand fuer "stark sauer"-Qualifier
+- `SOIL_NUM_TYPES = 4`, `SOIL_MIN_PIXELS = 50`, `SOIL_MIN_FRACTION = 0.05`
 
 **Fehlend (Phase 3+)**:
 - N-aware Duengen (crop-stage-spezifisch, via `nitrogenMap`). Vanilla "Duengen X/2" bleibt aktiv solange PF nicht den N-Task uebernimmt.
-- Polygon-Sampling mit Init-Mask-Filter (`bitVectorMapPHInitMask`) fuer Farmlands die teilweise Soil-Map-Coverage haben
+- Pixel-by-Pixel-Target-Lookup (statt nur dominantem Boden). Bei gemischten Feldern (z.B. 60% Lehmiger Sand + 40% Lehm) waere die genauere Variante: pro Pixel den jeweiligen Target aus seiner Bodenart ziehen und die Differenz aufsummieren. Aktuell nimmt v1 nur den haeufigsten Boden.
+- Init-Mask-Filter (`bitVectorMapPHInitMask`) fuer Farmlands die teilweise Soil-Map-Coverage haben
 - "Boden-Karte kaufen"-Hinweis fuer noch nicht freigeschaltete Farmlands
 
 ---
