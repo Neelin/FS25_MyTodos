@@ -81,6 +81,7 @@ am Ende der jeweiligen Sektion.
 - `mtProbeWeed <fieldId>` — Unkraut-Sampling testen (`getWeedFactor`, `weedSystem.factors`, polygon-Sweep über alle Werte 0..15)
 - `mtProbeHusbandry` — Tier-Placeable-API dumpen: `g_currentMission.placeableSystem.placeables`, eigene Husbandries filtern, alle `spec_husbandry*`-Specs auf Top-Level ausgeben
 - `mtProbeHusbandryDeep` — Tieferer Probe: dumpt die inneren Tabellen (fillLevels, supportedFillTypes, currentPallets, clusterHusbandry, meadow.fillLevels), listet Methoden der `PlaceableHusbandry`- und `clusterHusbandry`-Klassen via Metatable
+- `mtProbePf [fieldNumber]` — Precision-Farming-API dumpen. Top-Level-Keys + Methoden via Metatable fuer alle Sub-Maps (pHMap, nitrogenMap, soilMap, yieldMap, seedRateMap, coverMap, tramlineMap). Mit Feldnummer: spot-samplet pH/N/soilType am Feld-Mittelpunkt via diverser Method-Kandidaten -- `ValueMap.lua` ist von Giants ge-scrubbed, wir muessen via Trial-and-Error finden welche Methodensignaturen wirklich verfuegbar sind.
 - `mtSettings` — Settings-Dialog öffnen (statt Alt+M)
 
 ---
@@ -242,6 +243,85 @@ Spot-Sample-Funktionen `StoneSystem:getStoneLevelAtWorldPos(x,y,z)` / `getStoneS
 
 ---
 
+## Precision Farming (Phase 1+2: pH-aware Kalken)
+
+**Wichtige FS25-Eigenheit**: Im Gegensatz zu FS22 gibt es in FS25 **kein verlaessliches `g_precisionFarming`-Global**. Die PF-Maps (pHMap, nitrogenMap, soilMap, ...) leben direkt als Singleton-Referenzen auf jedem PF-fähigen Sprayer-Spec:
+```lua
+vehicle["spec_FS25_precisionFarming.extendedSprayer"].pHMap
+```
+Die zentrale PF-Instanz erreicht man indirekt via `pHMap.pfModule`. Auch `g_modManager.mods["FS25_precisionFarming"]` und Brute-Force-`_G`-Scans finden das Global nicht — Giants hat es vermutlich in eine Closure verlagert, die wir aus dem Mod-Land nicht erreichen.
+
+**Detection via Sprayer-Scan** (`MyTodos:findPfPHMap` in `MyTodosFields.lua`):
+- Durchlaeuft `g_currentMission.vehicleSystem.vehicles` und sucht das erste Fahrzeug mit `spec_*.pHMap` Attribut
+- Cached die `pHMap`-Referenz bei Erfolg, bei Misserfolg wird in der naechsten Scan-Iteration neu probiert (Spieler kauft Sprayer nach Spielstart -> Status wechselt von loaded-inactive zu active)
+- `MyTodos:isPfActive()` ist der zentrale Schalter fuer PF-vs-Vanilla-Logik
+
+**pHMap-Attribute** (empirisch via `mtProbePf` ermittelt):
+- `bitVectorMap=<DensityMapId>` — die Roh-Density-Map fuer Polygon-Sampling
+- `firstChannel=0`, `numChannels=5` — Bit-Layout (Range 0..31)
+- `maxValue=31`, `maxVisibleValue=31`
+- `pHValuePerState=0.125` — Konversion: 1 internal state = 0.125 pH units
+- `minimapGradientLabelName="pH 4.50 - 8.25"` — Wertebereich
+- `bitVectorMapPHInitMask` — separate Map: 1=initialisiert (Soil-Map gekauft), 0=uninitialisiert. Aktuell nicht zum Filtern genutzt (siehe TODOs)
+- `pfModule` — Backreferenz auf die zentrale PF-Instanz (so kommen wir an nitrogenMap, soilMap, ...)
+- Methode `pHMap:getPhValueFromInternalValue(internalValue)` — offizielle Konversion, bevorzugen wir, sonst Fallback `4.50 + internal * pHValuePerState`
+- `pHMap.valueTransformations` — **die Target-Lookup-Tabelle**, pro Bodentyp ein Eintrag:
+  ```
+  [1] = { soilTypeIndex=1, optimalValue=13, regularOffset=1.5, ...}  -> Lehmiger Sand pH 6.00
+  [2] = { soilTypeIndex=2, optimalValue=17, regularOffset=1.5, ...}  -> Sandiger Lehm pH 6.50
+  [3] = { soilTypeIndex=3, optimalValue=19, regularOffset=0.5, ...}  -> Lehm           pH 6.75
+  [4] = { soilTypeIndex=4, optimalValue=21, regularOffset=0.5, ...}  -> Schluffiger Ton pH 7.00
+  ```
+  **Frucht spielt keine Rolle**: das Optimum haengt nur vom Boden ab. Die Frucht beeinflusst ueber `pHMap.yieldCurve` den Ertrag (Yield-Loss pro internal-state-Abstand vom Optimum), aber nicht den Ziel-pH.
+- `pHMap.limeUsage.usagePerState=730` — kg Kalk pro state change (Info, fuer Task nicht gebraucht).
+
+**soilMap-Attribute**:
+- `bitVectorMap=<id>`, `typeFirstChannel=0`, `typeNumChannels=2` — 4 Bodentypen (Werte 1..4, 0=uninitialisiert)
+- `soilMap.soilTypes[1..4]` — `{ name, yieldPotential, color, colorBlind }` pro Bodenart:
+  ```
+  [1] Lehmiger Sand   (yieldPotential 0.80)
+  [2] Sandiger Lehm   (yieldPotential 1.00)
+  [3] Lehm            (yieldPotential 1.25)
+  [4] Schluffiger Ton (yieldPotential 0.90)
+  ```
+
+**Polygon-Sampling pH** (`MyTodos:samplePhForField`):
+- `DensityMapModifier.new(pHMap.bitVectorMap, firstChannel, numChannels, terrainRootNode)`
+- `applyFieldPolygon` (Helper, gleicher Code wie Weed/Stone-Sampler)
+- `mod:executeGet()` ohne Filter -> `sum, pixelArea, totalArea`
+- `avgInternal = sum / pixelArea`. Bei `avgInternal < 1` -> "Soil-Map nicht gekauft" -> nil
+- Konvertierung zu real-pH via `pHMap:getPhValueFromInternalValue(avg)`
+- Liefert `{ real=pH, internal=avgInternal }` damit Vergleiche in beiden Einheiten moeglich sind.
+
+**Soil-Sampler** (`MyTodos:initSoilSampler`, `sampleDominantSoilType`):
+- Schnappt `soilMap` via `pHMap.pfModule.soilMap` (oder `pHMap.soilMap` als Fallback)
+- DensityMapModifier auf `soilMap.bitVectorMap` mit `typeFirstChannel/typeNumChannels`
+- Polygon-Sample mit `EQUAL`-Filtern fuer Werte 1..N, ermittelt dominanten Boden
+- Schwelle `max(50px, 5% Feldflaeche)` damit Bodenart als "dominant" zaehlt
+- v1 dominant-soil-Approach (statt Pixel-weisem Target) -- ein gemischtes Feld bekommt den Target des haeufigsten Bodens
+
+**Label-Logik** (`limeTaskPf`):
+- pH-Polygon-Average lesen
+- Dominante Bodenart bestimmen
+- Target = `valueTransformations[soilIdx].optimalValue` (-> via getPhValueFromInternalValue auf real-pH)
+- Trigger = `optimalValue - regularOffset` (in internal states; entspricht ~0.06-0.19 pH Toleranz je nach Boden) -- exakt wie PF's Auto-Apply trigger
+- Bei `avg.internal < trigger` -> Task `"Kalk: pH 5.8 / 6.5 (Sandiger Lehm)"`
+- Wenn `avg.internal <= trigger - PH_HEAVY_GAP_STATES` (4 states ~ 0.5 pH, entspricht ~80% Yield laut yieldCurve) -> Suffix `", stark sauer"` in der Klammer
+
+**In `deriveParallelVanilla`**: bei aktivem PF nur `limeTaskPf`, ohne PF nur Vanilla `limeLevel == 0 -> "Kalken"`. Kein Misch-Modus.
+
+**Schwellen-Konstanten** oben in `MyTodosFields.lua`:
+- `PH_HEAVY_GAP_STATES = 4` — Internal-State-Abstand fuer "stark sauer"-Qualifier
+- `SOIL_NUM_TYPES = 4`, `SOIL_MIN_PIXELS = 50`, `SOIL_MIN_FRACTION = 0.05`
+
+**Fehlend (Phase 3+)**:
+- N-aware Duengen (crop-stage-spezifisch, via `nitrogenMap`). Vanilla "Duengen X/2" bleibt aktiv solange PF nicht den N-Task uebernimmt.
+- Pixel-by-Pixel-Target-Lookup (statt nur dominantem Boden). Bei gemischten Feldern (z.B. 60% Lehmiger Sand + 40% Lehm) waere die genauere Variante: pro Pixel den jeweiligen Target aus seiner Bodenart ziehen und die Differenz aufsummieren. Aktuell nimmt v1 nur den haeufigsten Boden.
+- Init-Mask-Filter (`bitVectorMapPHInitMask`) fuer Farmlands die teilweise Soil-Map-Coverage haben
+- "Boden-Karte kaufen"-Hinweis fuer noch nicht freigeschaltete Farmlands
+
+---
+
 ## Settings-Menü (echtes GUI für Maus-Decoupling)
 
 Alt+M öffnet einen ScreenElement der über `g_gui:showGui("MyTodosSettingsScreen")` läuft → Engine entkoppelt Maus automatisch (wie ESC-Menü). Im Screen wird das Settings-Panel gezeichnet via `drawSettingsContent()` und Klicks via `handleSettingsClick()` an MyTodos delegiert.
@@ -301,13 +381,20 @@ Discovery + Task-Derivation live (10. Mai 2026). HUD zeigt eine zweite Sektion "
 
 ## Offene Themen / Was wir noch wollten
 
-1. **PrecisionFarming-Pfad**: aktuell fällt PF auf Vanilla-Logik zurück. Echtes PF-Modell (N-Bedarf pro Wachstumsstufe via `g_precisionFarming`, pH-basiertes Kalken) noch nicht gebaut.
+1. **PrecisionFarming Phase 3+**: pH-Kalken ist live (Phase 1+2). Noch offen: N-aware Duengen (crop-stage-spezifisch), Polygon-pH-Sampling statt Center-Spot, "Boden-Karte kaufen"-Hinweis.
 2. **Tier-Husbandries**: siehe oben. Probe läuft, Discovery + Tasks fehlen noch.
 3. **Düngen-Lockout-Persistence**: optional, nice-to-have.
 4. **`weedFactor`-Schwelle**: User hat angemerkt dass `Unkraut` ohne Prozent (weedState=1, weedFactor=0) ggf. nervt — Trigger könnte auf `weedFactor > 0` oder kleine Schwelle geschärft werden.
 5. **PF-Detection**: aktuell wird nach `g_precisionFarming` und ein paar Mod-Namen geguckt — falls `mtRescan` "precision farming: no" ausgibt obwohl PF läuft, in `detectPrecisionFarming()` den korrekten Mod-Folder-Namen ergänzen.
 
-## Stand 11. Mai 2026
+## Stand 11. Mai 2026 (Precision Farming Phase 1+2)
+
+- **PF-Probe-Command `mtProbePf [fieldNumber]`** drin (siehe Doku oben). Dumpt `g_precisionFarming` + alle Sub-Maps mit Methoden via Metatable, optional Spot-Sample diverser pH/N/soilType-Method-Kandidaten am Feld-Mittelpunkt.
+- **pH-aware "Kalk"-Task** ersetzt vanilla "Kalken" wenn PF geladen. `MyTodos:initPhSampler` waehlt zur Runtime die passende `pHMap:get*AtWorldPos`-Methode via Trial-and-Error (Scrubbing-Workaround). `samplePhAtFieldCenter` macht Spot-Sample am Feld-Mittelpunkt. Label-Format: `"Kalk: pH 5.2 (sauer)"` oder `"... (stark sauer)"` bei `<5.5`.
+- **Kein Misch-Modus**: PF an -> nur PF-pH-Logik, PF aus -> nur vanilla `limeLevel == 0`. Vanilla limeLevel hat unter PF andere Semantik.
+- **Noch nicht implementiert** in dieser Phase: Polygon-pH-Sampling (nur Center-Spot), N-aware Duengen, "Boden-Karte kaufen"-Task.
+
+## Stand 11. Mai 2026 (HUD-Anker)
 
 - **HUD-Position + Schriftgroesse dynamisch an Giants' InputHelpDisplay angehaengt** (`MyTodos:getHudMetrics` in `MyTodos.lua`). Kein Drag mehr, keine persistierte hudX/hudY. F1-Toggle blendet das Giants-Hilfepanel aus, MyTodos bleibt aber an derselben Stelle (Geometrie + `inputHelp.textSize` werden auch im invisible-State gepflegt). Body-Font = `inputHelp.textSize` (= `scalePixelToScreenHeight(12)`), Title = `* HUD_TITLE_SCALE`. Pro-Sektion-Zeilencap statt geteiltes Budget (`HUD_MAX_FIELD_LINES = 14`, `HUD_MAX_HUSB_LINES = 8`).
 - **Neue Action `MYTODOS_TOGGLE_HUD`** (Default `RShift+T`) blendet das HUD an/aus. Setting `hudVisible` (bool, persistiert in `MyTodos.xml`) als Fallback im Settings-Dialog.
