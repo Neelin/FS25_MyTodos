@@ -245,33 +245,48 @@ Spot-Sample-Funktionen `StoneSystem:getStoneLevelAtWorldPos(x,y,z)` / `getStoneS
 
 ## Precision Farming (Phase 1+2: pH-aware Kalken)
 
-PF wird via `g_precisionFarming` erkannt (gesetzt vom internen `FS25_precisionFarming`-Mod). Sub-Maps:
+**Wichtige FS25-Eigenheit**: Im Gegensatz zu FS22 gibt es in FS25 **kein verlaessliches `g_precisionFarming`-Global**. Die PF-Maps (pHMap, nitrogenMap, soilMap, ...) leben direkt als Singleton-Referenzen auf jedem PF-fähigen Sprayer-Spec:
+```lua
+vehicle["spec_FS25_precisionFarming.extendedSprayer"].pHMap
+```
+Die zentrale PF-Instanz erreicht man indirekt via `pHMap.pfModule`. Auch `g_modManager.mods["FS25_precisionFarming"]` und Brute-Force-`_G`-Scans finden das Global nicht — Giants hat es vermutlich in eine Closure verlagert, die wir aus dem Mod-Land nicht erreichen.
 
-- `pHMap` — pH-Werte pro Tile, ersetzt vanilla `limeLevel`
-- `nitrogenMap` — N-Werte + crop-stage-spezifische Bedarfe, ersetzt vanilla `sprayLevel` (noch nicht implementiert, Phase 3)
-- `soilMap` — Bodentyp, Yield-Potenzial. Muss pro Farmland **gekauft** werden (`soilMap:purchaseSoilMaps(farmlandId)`) damit pH/N auslesbar sind
-- `yieldMap`, `seedRateMap`, `coverMap`, `tramlineMap` — Tool-/Visualisierungs-Features, nicht relevant fuer MyTodos
+**Detection via Sprayer-Scan** (`MyTodos:findPfPHMap` in `MyTodosFields.lua`):
+- Durchlaeuft `g_currentMission.vehicleSystem.vehicles` und sucht das erste Fahrzeug mit `spec_*.pHMap` Attribut
+- Cached die `pHMap`-Referenz bei Erfolg, bei Misserfolg wird in der naechsten Scan-Iteration neu probiert (Spieler kauft Sprayer nach Spielstart -> Status wechselt von loaded-inactive zu active)
+- `MyTodos:isPfActive()` ist der zentrale Schalter fuer PF-vs-Vanilla-Logik
 
-**Wichtig**: `ValueMap.lua` (Basis fuer pHMap/nitrogenMap) ist in `_gameSource` ge-scrubbed — Function-Bodies geleert. Wir kennen Methodennamen nur aus externen Aufrufstellen (z.B. `pHMap:getPhValueFromInternalValue`, `getMinMaxValue`, `getPhValueFromChangedStates`). Fuer worldPos-Sampling muessen wir verschiedene Method-Signaturen probieren -- siehe `mtProbePf` und `MyTodos:initPhSampler`.
+**pHMap-Attribute** (empirisch via `mtProbePf` ermittelt):
+- `bitVectorMap=<DensityMapId>` — die Roh-Density-Map fuer Polygon-Sampling
+- `firstChannel=0`, `numChannels=5` — Bit-Layout (Range 0..31)
+- `maxValue=31`, `maxVisibleValue=31`
+- `pHValuePerState=0.125` — Konversion: 1 internal state = 0.125 pH units
+- `minimapGradientLabelName="pH 4.50 - 8.25"` — Wertebereich
+- `bitVectorMapPHInitMask` — separate Map: 1=initialisiert (Soil-Map gekauft), 0=uninitialisiert. Aktuell nicht zum Filtern genutzt (siehe TODOs)
+- `pfModule` — Backreferenz auf die zentrale PF-Instanz (so kommen wir an nitrogenMap, soilMap, ...)
+- Methode `pHMap:getPhValueFromInternalValue(internalValue)` — offizielle Konversion, bevorzugen wir, sonst Fallback `4.50 + internal * pHValuePerState`
 
-**Implementierung in `MyTodosFields.lua`:**
+**Polygon-Sampling** (`MyTodos:samplePhForField`):
+- `DensityMapModifier.new(pHMap.bitVectorMap, firstChannel, numChannels, terrainRootNode)`
+- `applyFieldPolygon` (Helper, gleicher Code wie Weed/Stone-Sampler)
+- `mod:executeGet()` ohne Filter -> `sum, pixelArea, totalArea`
+- `avgInternal = sum / pixelArea`. Bei `avgInternal < 1` -> "Soil-Map nicht gekauft" -> nil
+- Konvertierung zu real-pH via `pHMap:getPhValueFromInternalValue(avg)`
 
-- `initPhSampler()` waehlt zur Init-Zeit eine funktionierende Method-Signatur fuer pH-at-worldPos:
-  1. `pHMap:getPhValueAtWorldPos(x, z)` -- direkter real-pH-Getter (selten)
-  2. `pHMap:getInternalValueAtWorldPos(x, z)` -> `:getPhValueFromInternalValue(raw)`
-  3. `pHMap:getValueAtWorldPos(x, z)` -> `:getPhValueFromInternalValue(raw)`
-  Jeden Kandidaten mit `pcall(fn, m, 0, 0)` testen, erster passender wird gecached.
-- `samplePhAtFieldCenter(field)` -- Spot-Sample am Feld-Mittelpunkt (BBox-Mitte). **Kein Polygon-Sampling** in v1, dazu muessten wir `pHMap.densityMapId`/`firstChannel`/`numChannels` kennen -- Attribute-Namen unbekannt wegen Scrubbing.
-- `limeTaskPf(field)` -- liefert `"Kalk: pH X.X (sauer/stark sauer)"` wenn `samplePh < PH_TARGET_MIN` (Default 6.5). `< 1.0` gilt als "nicht ausgelesen" (Soil-Map nicht gekauft) und gibt nil.
-- In `deriveParallelVanilla`: wenn PF aktiv -> `limeTaskPf(field)`, sonst Vanilla `limeLevel == 0 → "Kalken"`. **Kein Misch-Modus**: vanilla `limeLevel` hat unter PF andere Semantik.
+**Label-Logik** (`limeTaskPf`):
+- pH >= `PH_TARGET_MIN` (6.5) -> nil (kein Task, pH okay)
+- pH < `PH_VERY_ACIDIC` (5.5) -> `"Kalk: pH 4.8 (stark sauer)"`
+- sonst -> `"Kalk: pH 5.9 (sauer)"`
 
-**Schwellen** (Konstanten oben in `MyTodosFields.lua`):
-- `PH_TARGET_MIN = 6.5` -- Trigger fuer "Kalk"-Task
-- `PH_VERY_ACIDIC = 5.5` -- darunter Label-Qualifier "stark sauer"
+**In `deriveParallelVanilla`**: bei aktivem PF nur `limeTaskPf`, ohne PF nur Vanilla `limeLevel == 0 -> "Kalken"`. Kein Misch-Modus, weil Vanilla-`limeLevel` unter PF andere Semantik hat (boolean vs. pH-Skala).
+
+**Schwellen-Konstanten** oben in `MyTodosFields.lua`:
+- `PH_TARGET_MIN = 6.5`
+- `PH_VERY_ACIDIC = 5.5`
 
 **Fehlend (Phase 3+)**:
-- N-aware Duengen (crop-stage-spezifisch). Vanilla "Duengen X/2" bleibt aktiv solange PF nicht den N-Task uebernimmt.
-- Polygon-pH-Sampling (genauer als Center-Spot)
+- N-aware Duengen (crop-stage-spezifisch, via `nitrogenMap`). Vanilla "Duengen X/2" bleibt aktiv solange PF nicht den N-Task uebernimmt.
+- Polygon-Sampling mit Init-Mask-Filter (`bitVectorMapPHInitMask`) fuer Farmlands die teilweise Soil-Map-Coverage haben
 - "Boden-Karte kaufen"-Hinweis fuer noch nicht freigeschaltete Farmlands
 
 ---

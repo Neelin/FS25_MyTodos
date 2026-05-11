@@ -103,17 +103,16 @@ function MyTodos:collectOwnedFields(farmId)
 end
 
 -- Liefert einen der drei Zustaende:
---   "active"           -> g_precisionFarming existiert. Volles PF-Behavior.
---   "loaded-inactive"  -> PF-Mod ist registriert (Lua-Klassen geladen) aber
---                         Instanz fehlt. Typischer Grund: PF im Save nicht
---                         aktiviert (Opt-in beim Save-Erstellen). Verhalten
---                         wie Vanilla.
+--   "active"           -> PF-Sprayer in der Welt gefunden, Maps via Spec
+--                         erreichbar. Volles PF-Behavior.
+--   "loaded-inactive"  -> PF-Mod ist registriert aber kein Sprayer mit
+--                         PF-Spec gefunden. Entweder noch keinen gekauft,
+--                         oder Map hat keinen PF-Support.
 --   nil                -> PF-Mod gar nicht installiert.
--- Source of truth ist `g_precisionFarming` -- die Mod-Name-Heuristik in
--- `g_modIsLoaded` taugt nur fuer das diagnostische Loaded-Inactive-Label,
--- nicht fuer Verhaltens-Switching.
+-- In FS25 gibt es kein verlaessliches Global `g_precisionFarming` mehr --
+-- siehe `findPfPHMap()`.
 function MyTodos:detectPrecisionFarming()
-    if g_precisionFarming ~= nil then
+    if self:isPfActive() then
         return "active"
     end
     if g_modIsLoaded ~= nil then
@@ -413,92 +412,116 @@ end
 
 -- pH-Sampler (Precision Farming) -----------------------------------
 --
--- Liefert pH-Wert am Feld-Mittelpunkt via pHMap. Wegen ge-scrubbter
--- ValueMap-Klasse in _gameSource kennen wir die genaue Methodensignatur
--- nicht von vornherein -- in `initPhSampler` probieren wir mehrere
--- Kandidaten durch und cachen die funktionierende als Closure.
+-- In FS25 hat Giants den PF-Mod umgebaut: `g_precisionFarming` als
+-- klassisches Global existiert nicht (mehr). Stattdessen leben pHMap,
+-- nitrogenMap, soilMap auf jedem PF-Sprayer-Spec als Singleton-Referenz
+-- (`vehicle["spec_FS25_precisionFarming.extendedSprayer"].pHMap`). Die
+-- zentrale PF-Instanz erreichen wir indirekt via `pHMap.pfModule`.
 --
--- Konvertierung: manche Getter liefern die "internal" density-map-Werte
--- (0..MaxValue), andere bereits den realen pH. Wir erkennen das durch
--- Wertebereich-Check beim Init.
+-- Strategie: einmal alle Fahrzeuge in `g_currentMission.vehicleSystem.vehicles`
+-- scannen, erste pHMap-Referenz schnappen, cachen. Polygon-Sampling per
+-- DensityMapModifier auf `pHMap.bitVectorMap` mit den Channels die in
+-- der Map-Instanz selbst stehen.
+--
+-- pHValue-Konvertierung: aus dem Engine-Dump empirisch belegt
+--   real_pH = 4.50 + internalValue * 0.125  (range 4.50 - 8.25, max 31)
+-- Bevorzugt verwenden wir aber `pHMap:getPhValueFromInternalValue(v)` wenn
+-- verfuegbar.
 
-function MyTodos:initPhSampler()
-    if self.phSamplerReady ~= nil then return self.phSampleFn ~= nil end
-    self.phSamplerReady = true
-    self.phSampleFn = nil
-
-    local pf = g_precisionFarming
-    if pf == nil or pf.pHMap == nil then
-        return false
-    end
-    local m = pf.pHMap
-    local hasConverter = type(m.getPhValueFromInternalValue) == "function"
-
-    -- Kandidaten in Reihenfolge "wahrscheinlich am direktesten":
-    -- 1. Direkter pH-Getter (selten)
-    -- 2. Generischer Value-Getter -> via Konverter zu real-pH
-    local candidates = {
-        { name = "getPhValueAtWorldPos",       needsConvert = false },
-        { name = "getInternalValueAtWorldPos", needsConvert = true  },
-        { name = "getValueAtWorldPos",         needsConvert = true  },
-    }
-    for _, cand in ipairs(candidates) do
-        local fn = m[cand.name]
-        if type(fn) == "function" and (not cand.needsConvert or hasConverter) then
-            -- Sanity-Test: feuert die Methode ueberhaupt ohne Crash?
-            local ok, v = pcall(fn, m, 0, 0)
-            if ok and type(v) == "number" then
-                local sampler
-                if cand.needsConvert then
-                    sampler = function(x, z)
-                        local ok1, raw = pcall(fn, m, x, z)
-                        if not ok1 or type(raw) ~= "number" then return nil end
-                        local ok2, ph = pcall(m.getPhValueFromInternalValue, m, raw)
-                        if not ok2 or type(ph) ~= "number" then return nil end
-                        return ph
-                    end
-                else
-                    sampler = function(x, z)
-                        local ok1, ph = pcall(fn, m, x, z)
-                        if not ok1 or type(ph) ~= "number" then return nil end
-                        return ph
-                    end
+-- Sucht in der Fahrzeug-Liste nach einem Sprayer mit PF-Spec und gibt
+-- dessen pHMap-Referenz zurueck. Erfolg wird gecached. Im Negativ-Fall
+-- nicht cachen, damit es spaeter (nach Sprayer-Spawn) nochmal versucht
+-- wird.
+function MyTodos:findPfPHMap()
+    if self._pfPHMapCached ~= nil then return self._pfPHMapCached end
+    local vsys = g_currentMission and g_currentMission.vehicleSystem
+    if vsys == nil or type(vsys.vehicles) ~= "table" then return nil end
+    for _, veh in ipairs(vsys.vehicles) do
+        if type(veh) == "table" then
+            for k, v in pairs(veh) do
+                if tostring(k):find("^spec_") and type(v) == "table"
+                        and v.pHMap ~= nil then
+                    self._pfPHMapCached = v.pHMap
+                    return v.pHMap
                 end
-                self.phSampleFn = sampler
-                Logging.info("[MyTodos] pH sampler ready via pHMap:%s (convert=%s)",
-                    cand.name, tostring(cand.needsConvert))
-                return true
             end
         end
     end
-    Logging.info("[MyTodos] pH sampler: no usable worldPos getter on pHMap")
-    return false
+    return nil
 end
 
--- Liefert pH am Feld-Mittelpunkt oder nil.
-function MyTodos:samplePhAtFieldCenter(field)
-    if not self:initPhSampler() then return nil end
-    local pp = field and field.polygonPoints
-    if type(pp) ~= "table" or #pp == 0 then return nil end
-    local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
-    for _, nodeId in ipairs(pp) do
-        local x, _, z = getWorldTranslation(nodeId)
-        if x < minX then minX = x end
-        if x > maxX then maxX = x end
-        if z < minZ then minZ = z end
-        if z > maxZ then maxZ = z end
+-- Liefert true wenn PF in dieser Welt tatsaechlich aktiv ist (= ein
+-- PF-Sprayer existiert von dem wir pHMap holen koennen).
+function MyTodos:isPfActive()
+    return self:findPfPHMap() ~= nil
+end
+
+function MyTodos:initPhSampler()
+    if self.phSamplerReady ~= nil then return self.phMod ~= nil end
+    local pHMap = self:findPfPHMap()
+    if pHMap == nil then
+        return false  -- nicht cachen, evtl. spawnt spaeter ein Sprayer
     end
-    local cx, cz = (minX + maxX) / 2, (minZ + maxZ) / 2
-    return self.phSampleFn(cx, cz)
+    self.phSamplerReady = true
+    self.phMod = nil
+    self.phMap = pHMap
+
+    if pHMap.bitVectorMap == nil then
+        Logging.info("[MyTodos] pH sampler: pHMap.bitVectorMap nil")
+        return false
+    end
+    if DensityMapModifier == nil or g_currentMission.terrainRootNode == nil then
+        Logging.info("[MyTodos] pH sampler: DensityMapModifier oder terrainRootNode missing")
+        return false
+    end
+
+    local ok, mod = pcall(DensityMapModifier.new, pHMap.bitVectorMap,
+        pHMap.firstChannel or 0, pHMap.numChannels or 5,
+        g_currentMission.terrainRootNode)
+    if not ok or mod == nil then
+        Logging.warning("[MyTodos] pH sampler: DensityMapModifier.new failed: %s", tostring(mod))
+        return false
+    end
+    self.phMod = mod
+    Logging.info("[MyTodos] pH sampler ready (bitVectorMap=%s firstCh=%s numCh=%s maxValue=%s pHValuePerState=%s)",
+        tostring(pHMap.bitVectorMap), tostring(pHMap.firstChannel),
+        tostring(pHMap.numChannels), tostring(pHMap.maxValue),
+        tostring(pHMap.pHValuePerState))
+    return true
+end
+
+-- Polygon-Average ueber das Feld. Konvertiert internal -> real pH via
+-- pHMap-Methode wenn vorhanden, sonst via empirischer Formel.
+function MyTodos:samplePhForField(field)
+    if not self:initPhSampler() then return nil end
+    if type(field.polygonPoints) ~= "table" or #field.polygonPoints == 0 then
+        return nil
+    end
+    self:applyFieldPolygon(self.phMod, field)
+    -- executeGet() ohne Filter: sum, pixelArea, totalArea
+    local sum, pixelArea, _ = self.phMod:executeGet()
+    if pixelArea == nil or pixelArea < 1 then return nil end
+    local avgInternal = sum / pixelArea
+    -- Sehr niedrige Averages = "Soil-Map nicht gekauft" (uninitialisierte
+    -- Tiles haben internal=0). Schwellwert empirisch: bei gekauften Maps
+    -- liegt der Average typisch bei 5-25 (entspricht pH 5-7.5).
+    if avgInternal < 1 then return nil end
+
+    local m = self.phMap
+    if type(m.getPhValueFromInternalValue) == "function" then
+        local ok, real = pcall(m.getPhValueFromInternalValue, m, avgInternal)
+        if ok and type(real) == "number" then return real end
+    end
+    -- Fallback: aus den Probe-Dump-Daten abgeleitet.
+    local step = m.pHValuePerState or 0.125
+    return 4.50 + avgInternal * step
 end
 
 -- Liefert "Kalk: pH X.X (qualifier)"-Label oder nil wenn nichts zu tun.
--- nil heisst auch: PF nicht da / Soil-Map nicht gekauft / pH okay.
+-- nil heisst auch: PF nicht aktiv / Soil-Map nicht gekauft / pH okay.
 function MyTodos:limeTaskPf(field)
-    if g_precisionFarming == nil then return nil end
-    local ph = self:samplePhAtFieldCenter(field)
-    -- Werte unter 1.0 sind in der Praxis "nicht ausgelesen" (Soil-Map
-    -- nicht gekauft, oder Feldmittelpunkt ist nicht auf Soil-Tile).
+    if not self:isPfActive() then return nil end
+    local ph = self:samplePhForField(field)
     if ph == nil or ph < 1.0 then return nil end
     if ph >= MyTodos.PH_TARGET_MIN then return nil end
     local qualifier = (ph < MyTodos.PH_VERY_ACIDIC) and "stark sauer" or "sauer"
@@ -787,13 +810,13 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
 
     -- Kalken: bei regrowing/non-consuming Fruechten ueberspringen
     -- (Gras profitiert nicht). Bei PF (Precision Farming) lesen wir den
-    -- realen pH-Wert vom pHMap-Spot-Sample und triggern nur wenn unter
+    -- realen pH-Wert via pHMap-Polygon-Sample und triggern nur wenn unter
     -- Zielbereich. Ohne PF fallen wir zurueck auf Vanilla limeLevel==0.
-    -- Bewusst kein Misch-Verhalten: wenn PF an, kein Vanilla-Fallback,
+    -- Bewusst kein Misch-Verhalten: wenn PF aktiv, kein Vanilla-Fallback,
     -- denn vanilla limeLevel hat unter PF andere Semantik.
     local limeBenefits = (fruit == nil) or (fruit.consumesLime ~= false)
     if limeBenefits then
-        if g_precisionFarming ~= nil then
+        if self:isPfActive() then
             local pfTask = self:limeTaskPf(field)
             if pfTask ~= nil then
                 table.insert(out, pfTask)

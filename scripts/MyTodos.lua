@@ -167,9 +167,10 @@ function MyTodos:update(dt)
 end
 
 function MyTodos:scanFields(verbose)
-    if not self.firstScanDone then
-        self.precisionFarming = self:detectPrecisionFarming()
-    end
+    -- PF-Detection bei jedem Scan, weil PF-Sprayer in der Welt erst
+    -- spaeter spawnen koennten (z.B. Spieler kauft Streuer nach
+    -- Spielstart -> Status wechselt von "loaded-inactive" zu "active").
+    self.precisionFarming = self:detectPrecisionFarming()
 
     local owned = self:collectOwnedFields(self.farmId)
     self.fieldOwnedCount = #owned
@@ -205,9 +206,9 @@ function MyTodos:scanFields(verbose)
         local pf = self.precisionFarming
         local pfMsg = pf or "no"
         if pf == "loaded-inactive" then
-            pfMsg = "loaded-inactive (PF-Mod registriert, aber g_precisionFarming nil -- vermutlich im Save nicht aktiviert; Verhalten wie Vanilla)"
+            pfMsg = "loaded-inactive (PF-Mod registriert, aber kein Sprayer mit PF-Spec gefunden -- Verhalten wie Vanilla)"
         elseif pf == "active" then
-            pfMsg = "active (g_precisionFarming verfuegbar)"
+            pfMsg = "active (pHMap-Ref via Sprayer-Spec gefunden)"
         end
         Logging.info("[MyTodos] precision farming: %s", pfMsg)
         Logging.info("[MyTodos] plowing required: %s",
