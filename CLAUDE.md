@@ -39,24 +39,35 @@ Das Tool ist eine **Erinnerungs-Liste für erfahrene Spieler**, keine Schritt-f�
 - `BaseMission.draw` → HUD zeichnen
 - `g_currentMission:addUpdateable(self)` → Update-Tick für Polling
 
-## HUD-Position (Anker statt Drag)
+## HUD-Anker + Schriftgroesse (alles aus InputHelp)
 
-HUD-Position wird pro Frame dynamisch aus Giants' `InputHelpDisplay`
-abgeleitet (das F1-Hilfepanel oben links). Logik in `MyTodos:getHudAnchor()`:
+Position UND Body-Schriftgroesse werden pro Frame dynamisch aus Giants'
+`InputHelpDisplay` abgeleitet (das F1-Hilfepanel oben links). Eine
+Funktion liefert beides: `MyTodos:getHudMetrics()`.
 
 - `g_currentMission.hud.inputHelp:getPosition()` → linke obere Ecke des
   Hilfepanels
 - `inputHelp.lineBg.width` → Breite einer Hilfezeile (3-slice background,
   von Giants in `storeScaledValues` auf 330px-skaliert gesetzt)
+- `inputHelp.textSize` → Body-Schriftgroesse, Giants berechnet
+  `self.textSize = self:scalePixelToScreenHeight(12)` -> skaliert mit
+  UI-Scale-Setting und Aufloesung. MyTodos uebernimmt 1:1, Title ist
+  `textSize * HUD_TITLE_SCALE` (1.15) und fett.
 - MyTodos linke obere Ecke = `(posX + width + HUD_ANCHOR_MARGIN_X, posY)`
-- Fallback wenn inputHelp/lineBg noch nicht initialisiert: `g_hudAnchorLeft + margin, g_hudAnchorTop`
+- Fallback wenn inputHelp/lineBg/textSize noch nicht initialisiert:
+  `g_hudAnchorLeft + margin, g_hudAnchorTop, HUD_FALLBACK_TEXT_SIZE`
 - **Kein Visibility-Check**: F1 setzt nur `setVisible(false)`, die Geometrie
-  bleibt gepflegt. So springt MyTodos nicht an die linke Bildschirmkante
-  wenn der Spieler die Hilfe ausblendet.
+  + textSize bleiben gepflegt. So springt MyTodos nicht an die linke
+  Bildschirmkante wenn der Spieler die Hilfe ausblendet.
 
 HUD an/aus wird ausschliesslich ueber `MYTODOS_TOGGLE_HUD` (Default
 `RShift+T`) oder den `hudVisible`-Toggle im Settings-Dialog gesteuert.
 Persistiert in `MyTodos.xml`.
+
+**Zeilen-Budget**: pro Sektion ein eigenes Cap. `HUD_MAX_FIELD_LINES = 14`,
+`HUD_MAX_HUSB_LINES = 8`. Verhindert dass eine grosse Sektion (z.B. 20
+Felder) die andere komplett auffrisst. Bei Ueberlauf "(+N weitere)"-Zeile
+am Ende der jeweiligen Sektion.
 
 ## Konsolen-Befehle (zum Debuggen)
 
@@ -298,7 +309,7 @@ Discovery + Task-Derivation live (10. Mai 2026). HUD zeigt eine zweite Sektion "
 
 ## Stand 11. Mai 2026
 
-- **HUD-Position dynamisch an Giants' InputHelpDisplay angehaengt** (`MyTodos:getHudAnchor` in `MyTodos.lua`). Kein Drag mehr, keine persistierte hudX/hudY. F1-Toggle blendet das Giants-Hilfepanel aus, MyTodos bleibt aber an derselben Stelle weil die Geometrie-Properties (`inputHelp.lineBg.width`, `getPosition()`) auch im invisible-State gepflegt werden.
+- **HUD-Position + Schriftgroesse dynamisch an Giants' InputHelpDisplay angehaengt** (`MyTodos:getHudMetrics` in `MyTodos.lua`). Kein Drag mehr, keine persistierte hudX/hudY. F1-Toggle blendet das Giants-Hilfepanel aus, MyTodos bleibt aber an derselben Stelle (Geometrie + `inputHelp.textSize` werden auch im invisible-State gepflegt). Body-Font = `inputHelp.textSize` (= `scalePixelToScreenHeight(12)`), Title = `* HUD_TITLE_SCALE`. Pro-Sektion-Zeilencap statt geteiltes Budget (`HUD_MAX_FIELD_LINES = 14`, `HUD_MAX_HUSB_LINES = 8`).
 - **Neue Action `MYTODOS_TOGGLE_HUD`** (Default `RShift+T`) blendet das HUD an/aus. Setting `hudVisible` (bool, persistiert in `MyTodos.xml`) als Fallback im Settings-Dialog.
 - **Entfernt**: `hudMovable`/`playerMouse` Settings, Mouse-Drag-Handler (`MyTodos:mouseEvent`, `MyTodos:isMouseOverPanel`), `BaseMission.mouseEvent`-Hook, Konsolenbefehl `mtResetHud`, `HUD_DEFAULT_X/Y` Konstanten, `HUD_EDIT_BG_COLOR`.
 - HUD-Text jetzt links-buendig (war vorher zentriert, passt zum Anker oben-links).

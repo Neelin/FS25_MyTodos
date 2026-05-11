@@ -25,13 +25,21 @@ MyTodos.RESCAN_INTERVAL_MS = 5000
 -- (normalisierte Screen-Koords).
 MyTodos.HUD_ANCHOR_MARGIN_X = 0.005
 
-MyTodos.HUD_TEXT_SIZE = 0.012
-MyTodos.HUD_TITLE_SIZE = 0.014
+-- Font-Groessen: Body-Text uebernimmt 1:1 die Groesse die Giants' InputHelp
+-- gerade nutzt (in `inputHelp.textSize` per `scalePixelToScreenHeight(12)`
+-- berechnet, skaliert also mit UI-Scale und Aufloesung). Title nochmal etwas
+-- groesser fuer optische Hierarchie. Fallback nur falls InputHelp beim
+-- ersten Draw noch nicht initialisiert ist.
+MyTodos.HUD_TITLE_SCALE = 1.15
+MyTodos.HUD_FALLBACK_TEXT_SIZE = 0.010
 MyTodos.HUD_LINE_SPACING = 1.4
-MyTodos.HUD_PAD_X = 0.012
-MyTodos.HUD_PAD_Y = 0.005
+MyTodos.HUD_PAD_X = 0.010
+MyTodos.HUD_PAD_Y = 0.004
 MyTodos.HUD_MIN_WIDTH = 0.16
-MyTodos.HUD_MAX_LINES = 12
+-- Pro Sektion ein eigenes Zeilen-Budget. Sonst frisst eine sehr lange
+-- Sektion (z.B. 20 Felder) die andere komplett auf.
+MyTodos.HUD_MAX_FIELD_LINES = 14
+MyTodos.HUD_MAX_HUSB_LINES = 8
 
 MyTodos.SETTINGS_X = 0.5
 MyTodos.SETTINGS_Y = 0.7
@@ -281,31 +289,41 @@ function MyTodos:updateMouseCursor()
     end
 end
 
--- Anchor lookup -----------------------------------------------------
+-- InputHelp-Metrics -------------------------------------------------
 --
--- Liefert linke obere Ecke fuer das HUD, ankerend an Giants'
--- InputHelpDisplay (das F1-Hilfepanel oben links). Bewusst KEIN
--- Visibility-Check: lineBg.width und Position werden auch dann gepflegt
--- wenn das Panel via F1 ausgeblendet wurde -- so springt MyTodos nicht
--- an die linke Bildschirmkante wenn der Spieler die Hilfe versteckt.
-function MyTodos:getHudAnchor()
+-- Liefert linke obere Ecke fuer das HUD plus den Body-Textsize-Wert.
+-- Beides kommt aus Giants' InputHelpDisplay (das F1-Hilfepanel oben
+-- links) -- so passt MyTodos pixel-genau neben das Game-Panel und nutzt
+-- exakt dieselbe Schriftgroesse wie die F1-Hilfezeilen.
+--
+-- Bewusst KEIN Visibility-Check: lineBg.width, Position und textSize
+-- werden auch dann gepflegt wenn das Panel via F1 ausgeblendet wurde --
+-- so springt/aendert sich MyTodos nicht wenn der Spieler die Hilfe
+-- versteckt.
+function MyTodos:getHudMetrics()
     local margin = MyTodos.HUD_ANCHOR_MARGIN_X
     local anchorX = (g_hudAnchorLeft or 0) + margin
     local anchorY = g_hudAnchorTop or 1.0
+    local textSize = MyTodos.HUD_FALLBACK_TEXT_SIZE
     local hud = g_currentMission and g_currentMission.hud
     local inputHelp = hud and hud.inputHelp
-    if inputHelp ~= nil and type(inputHelp.getPosition) == "function" then
-        local ok, posX, posY = pcall(inputHelp.getPosition, inputHelp)
-        if ok and posX ~= nil and posY ~= nil then
-            local lineBg = inputHelp.lineBg
-            local width = (lineBg and lineBg.width) or 0
-            if width > 0 then
-                anchorX = posX + width + margin
-                anchorY = posY
+    if inputHelp ~= nil then
+        if type(inputHelp.getPosition) == "function" then
+            local ok, posX, posY = pcall(inputHelp.getPosition, inputHelp)
+            if ok and posX ~= nil and posY ~= nil then
+                local lineBg = inputHelp.lineBg
+                local width = (lineBg and lineBg.width) or 0
+                if width > 0 then
+                    anchorX = posX + width + margin
+                    anchorY = posY
+                end
             end
         end
+        if type(inputHelp.textSize) == "number" and inputHelp.textSize > 0 then
+            textSize = inputHelp.textSize
+        end
     end
-    return anchorX, anchorY
+    return anchorX, anchorY, textSize
 end
 
 -- Drawing primitives ------------------------------------------------
@@ -340,8 +358,9 @@ function MyTodos:draw()
 end
 
 function MyTodos:drawHud()
-    local size = MyTodos.HUD_TEXT_SIZE
-    local titleSize = MyTodos.HUD_TITLE_SIZE
+    -- Anker + Schriftgroesse beide aus Giants' InputHelp-Geometrie.
+    local anchorX, anchorY, size = self:getHudMetrics()
+    local titleSize = size * MyTodos.HUD_TITLE_SCALE
     local lineH = size * MyTodos.HUD_LINE_SPACING
     local padX = MyTodos.HUD_PAD_X
     local padY = MyTodos.HUD_PAD_Y
@@ -365,6 +384,21 @@ function MyTodos:drawHud()
         maxW = math.max(maxW, getTextWidth(size, text))
     end
 
+    -- Schreibt bis maxLines Tasks aus `tasks` (formatiert via fmt) ins
+    -- rows-Array. Wenn ueberlaeuft, eine "(+N weitere)"-Zeile am Ende.
+    local function emitSection(tasks, maxLines, fmt)
+        local shown = 0
+        for _, t in ipairs(tasks) do
+            if shown >= maxLines then
+                addRow(string.format("(+%d weitere)", #tasks - shown),
+                    MyTodos.HUD_DIM_COLOR, false)
+                return
+            end
+            addRow(fmt(t), MyTodos.HUD_TEXT_COLOR, false)
+            shown = shown + 1
+        end
+    end
+
     if not hasField and not hasHusb then
         local s
         if fieldOwned == 0 and husbOwned == 0 then
@@ -374,43 +408,22 @@ function MyTodos:drawHud()
         end
         addRow(s, MyTodos.HUD_DIM_COLOR, false)
     else
-        local lineBudget = MyTodos.HUD_MAX_LINES
-
         if hasField then
             if showSubHeaders then
                 addRow("── Felder ──", MyTodos.HUD_DIM_COLOR, true)
-                lineBudget = lineBudget - 1
             end
-            local shown = 0
-            for _, t in ipairs(fTasks) do
-                if shown >= lineBudget then
-                    addRow(string.format("(+%d weitere)", #fTasks - shown),
-                        MyTodos.HUD_DIM_COLOR, false)
-                    break
-                end
-                addRow(string.format("F%s  %s", tostring(t.fieldId), t.task),
-                    MyTodos.HUD_TEXT_COLOR, false)
-                shown = shown + 1
-                lineBudget = lineBudget - 1
-            end
+            emitSection(fTasks, MyTodos.HUD_MAX_FIELD_LINES, function(t)
+                return string.format("F%s  %s", tostring(t.fieldId), t.task)
+            end)
         end
 
         if hasHusb then
             if showSubHeaders then
                 addRow("── Tiere ──", MyTodos.HUD_DIM_COLOR, true)
-                lineBudget = lineBudget - 1
             end
-            local shown = 0
-            for _, t in ipairs(hTasks) do
-                if lineBudget <= 0 then
-                    addRow(string.format("(+%d weitere)", #hTasks - shown),
-                        MyTodos.HUD_DIM_COLOR, false)
-                    break
-                end
-                addRow(t.task, MyTodos.HUD_TEXT_COLOR, false)
-                shown = shown + 1
-                lineBudget = lineBudget - 1
-            end
+            emitSection(hTasks, MyTodos.HUD_MAX_HUSB_LINES, function(t)
+                return t.task
+            end)
         end
     end
 
@@ -419,8 +432,6 @@ function MyTodos:drawHud()
     local bodyH = padY + #rows * lineH + padY
     local totalH = headerH + bodyH
 
-    -- Linke obere Ecke aus InputHelp-Geometrie (siehe getHudAnchor).
-    local anchorX, anchorY = self:getHudAnchor()
     local panelLeft = anchorX
     local panelTop = anchorY
     local panelBottom = panelTop - totalH
