@@ -79,20 +79,24 @@ Code-Änderungen FS25 komplett beenden+neustarten, sonst läuft alte Version.
 
 | Aktion | Tastenkombi |
 |---|---|
+| HUD ein/aus | **RShift + T** (umbelegbar im FS-Eingabe-Menü) |
 | Settings öffnen / schließen | **Alt + M** (umbelegbar im FS-Eingabe-Menü) |
-| HUD verschieben | Setting "HUD bewegbar" anschalten → LMB+Drag auf HUD |
+
+Die Position des HUD wird nicht manuell gesetzt — es ankert sich
+automatisch direkt rechts neben Giants' F1-Hilfepanel (das `InputHelpDisplay`
+links oben) und folgt dessen Position. Das HUD bleibt an derselben Stelle
+kleben auch wenn du das F1-Hilfepanel via F1 ausblendest.
 
 ### Settings-Menü
 
 Im Settings-Dialog kannst du:
 
-- **HUD bewegbar** an/aus — wenn an, lässt sich das HUD per Maus ziehen
-- **Maus immer sichtbar** an/aus
+- **HUD anzeigen** an/aus — derselbe Toggle wie RShift+T, hier nur als
+  Fallback wenn dir die Tastenkombi nicht mehr einfällt
 - **Schwellwerte** für Tier-Tasks (Futter, Wasser, Stroh, Weide / Mist,
   Gülle, Milch) in 5%-Schritten anpassen
 
-Position und Toggles werden in `<UserProfileApp>/modSettings/MyTodos.xml`
-persistiert.
+Toggles werden in `<UserProfileApp>/modSettings/MyTodos.xml` persistiert.
 
 ---
 
@@ -119,7 +123,6 @@ in der FS-Konsole (mit `~` öffnen, muss in `game.xml` ggf. aktiviert sein):
 | `mtProbeWindrowAt <feldNr>` | Schwad-Density-Map sampeln |
 | `mtProbeHusbandry` / `mtProbeHusbandryDeep` | Tierhaltungs-API dumpen |
 | `mtSettings` | Settings-Dialog öffnen (Alternative zu Alt+M) |
-| `mtResetHud` | HUD-Position auf Default zurücksetzen |
 
 `<feldNr>` ist immer die **Feldnummer wie auf der Karte zu sehen** (intern:
 `field.farmland.name`).
@@ -134,7 +137,6 @@ in der FS-Konsole (mit `~` öffnen, muss in `game.xml` ggf. aktiviert sein):
 - **Precision Farming**: aktuell läuft alles über die Vanilla-Logik. Ein
   echtes PF-Modell (N-Bedarf pro Stufe, pH-basiertes Kalken) ist geplant,
   aber noch nicht gebaut.
-- **HUD-Drag** dreht aktuell beim Ziehen die Kamera mit. Niedrige Prio.
 - **Düngen-Lockout** ist nur in-memory, nicht persistiert über Save-Reload.
 
 ---

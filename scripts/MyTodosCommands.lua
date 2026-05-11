@@ -48,15 +48,6 @@ function MyTodos:consoleRescanCmd()
     return string.format("MyTodos: rescanned %d field(s)", #self.fieldTasks)
 end
 
-addConsoleCommand("mtResetHud", "Reset MyTodos HUD to default position",
-    "consoleResetCmd", MyTodos)
-function MyTodos:consoleResetCmd()
-    self.hudX = MyTodos.HUD_DEFAULT_X
-    self.hudY = MyTodos.HUD_DEFAULT_Y
-    self:saveSettings()
-    return string.format("MyTodos HUD reset to %.3f, %.3f", self.hudX, self.hudY)
-end
-
 addConsoleCommand("mtDump", "Dump fieldState of a specific field. Usage: mtDump <fieldNumber>",
     "consoleDumpCmd", MyTodos)
 function MyTodos:consoleDumpCmd(arg)

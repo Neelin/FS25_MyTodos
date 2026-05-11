@@ -26,11 +26,15 @@
 
     <actions>
         <action name="MYTODOS_TOGGLE_SETTINGS"/>
+        <action name="MYTODOS_TOGGLE_HUD"/>
     </actions>
 
     <inputBinding>
         <actionBinding action="MYTODOS_TOGGLE_SETTINGS">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_lalt KEY_m"/>
+        </actionBinding>
+        <actionBinding action="MYTODOS_TOGGLE_HUD">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_rshift KEY_t"/>
         </actionBinding>
     </inputBinding>
 </modDesc>
