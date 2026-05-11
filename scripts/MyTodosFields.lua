@@ -102,9 +102,19 @@ function MyTodos:collectOwnedFields(farmId)
     return result
 end
 
+-- Liefert einen der drei Zustaende:
+--   "active"           -> g_precisionFarming existiert. Volles PF-Behavior.
+--   "loaded-inactive"  -> PF-Mod ist registriert (Lua-Klassen geladen) aber
+--                         Instanz fehlt. Typischer Grund: PF im Save nicht
+--                         aktiviert (Opt-in beim Save-Erstellen). Verhalten
+--                         wie Vanilla.
+--   nil                -> PF-Mod gar nicht installiert.
+-- Source of truth ist `g_precisionFarming` -- die Mod-Name-Heuristik in
+-- `g_modIsLoaded` taugt nur fuer das diagnostische Loaded-Inactive-Label,
+-- nicht fuer Verhaltens-Switching.
 function MyTodos:detectPrecisionFarming()
     if g_precisionFarming ~= nil then
-        return "g_precisionFarming"
+        return "active"
     end
     if g_modIsLoaded ~= nil then
         local candidates = {
@@ -115,7 +125,7 @@ function MyTodos:detectPrecisionFarming()
         }
         for _, name in ipairs(candidates) do
             if g_modIsLoaded[name] then
-                return name
+                return "loaded-inactive"
             end
         end
     end

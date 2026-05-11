@@ -202,8 +202,14 @@ function MyTodos:scanFields(verbose)
     self.fieldTasks = tasks
 
     if verbose then
-        Logging.info("[MyTodos] precision farming: %s",
-            self.precisionFarming ~= nil and self.precisionFarming or "no")
+        local pf = self.precisionFarming
+        local pfMsg = pf or "no"
+        if pf == "loaded-inactive" then
+            pfMsg = "loaded-inactive (PF-Mod registriert, aber g_precisionFarming nil -- vermutlich im Save nicht aktiviert; Verhalten wie Vanilla)"
+        elseif pf == "active" then
+            pfMsg = "active (g_precisionFarming verfuegbar)"
+        end
+        Logging.info("[MyTodos] precision farming: %s", pfMsg)
         Logging.info("[MyTodos] plowing required: %s",
             tostring(self:isPlowingRequired()))
         Logging.info("[MyTodos] local farm=%d owns %d field(s), %d with tasks (after %.2fs)",
