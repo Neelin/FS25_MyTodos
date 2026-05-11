@@ -707,3 +707,144 @@ addConsoleCommand("mtProbeHusbandryDeep", "Deep probe husbandry inner spec table
 function MyTodos:consoleProbeHusbandryDeepCmd()
     return self:husbandryProbeDeep()
 end
+
+-- Dumpt die PrecisionFarming-API-Surface (g_precisionFarming + Sub-Maps).
+-- Optional mit Feldnummer: samplet pH/N/soilType am Mittelpunkt des Feldes
+-- via diverser Methoden-Kandidaten -- so finden wir per Trial-and-Error
+-- die Method-Signaturen die in DIESEM Spiel-Build verfuegbar sind, weil
+-- ValueMap/PHMap-Klassen in _gameSource ge-scrubbed sind.
+addConsoleCommand("mtProbePf",
+    "Probe Precision Farming API. Usage: mtProbePf [fieldNumber]",
+    "consoleProbePfCmd", MyTodos)
+function MyTodos:consoleProbePfCmd(arg)
+    local pf = g_precisionFarming
+    if pf == nil then
+        return "g_precisionFarming nil - Precision Farming ist nicht aktiv"
+    end
+
+    -- 1. Top-level Keys
+    self:dumpKeys("g_precisionFarming", pf)
+    local pfMt = getmetatable(pf)
+    if pfMt ~= nil and pfMt.__index then
+        self:dumpKeys("g_precisionFarming.metatable.__index", pfMt.__index)
+    end
+
+    -- 2. Sub-Maps: Instance-Keys + Methoden via Metatable
+    local subMaps = {
+        "pHMap", "nitrogenMap", "soilMap", "yieldMap",
+        "seedRateMap", "coverMap", "tramlineMap",
+    }
+    for _, mapName in ipairs(subMaps) do
+        local m = pf[mapName]
+        if m ~= nil then
+            self:dumpKeys("g_precisionFarming." .. mapName, m)
+            local mt = getmetatable(m)
+            if mt ~= nil and mt.__index then
+                -- Nur Methoden listen, sonst zerschiesst die Tabelle das Log
+                local fns = {}
+                for k, v in pairs(mt.__index) do
+                    if type(v) == "function" then
+                        table.insert(fns, k)
+                    end
+                end
+                table.sort(fns)
+                Logging.info("[MyTodos]   %s methods (%d): %s",
+                    mapName, #fns, table.concat(fns, ", "))
+            end
+        else
+            Logging.info("[MyTodos] g_precisionFarming.%s: nil", mapName)
+        end
+    end
+
+    -- 3. Wenn Feldnummer gegeben: Spot-Sample am Feld-Mittelpunkt
+    if arg == nil or arg == "" then
+        return "PF top-level + sub-maps dumped. Pass <fieldNumber> for sampling."
+    end
+    local field = self:resolveFieldByUserNumber(arg)
+    if field == nil then
+        return string.format("Field %s not found", tostring(arg))
+    end
+    local pp = field.polygonPoints
+    if type(pp) ~= "table" or #pp == 0 then
+        return "Field has no polygonPoints"
+    end
+
+    local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+    for _, nodeId in ipairs(pp) do
+        local x, _, z = getWorldTranslation(nodeId)
+        if x < minX then minX = x end
+        if x > maxX then maxX = x end
+        if z < minZ then minZ = z end
+        if z > maxZ then maxZ = z end
+    end
+    local cx, cz = (minX + maxX) / 2, (minZ + maxZ) / 2
+    local cy = 0
+    if g_currentMission and g_currentMission.terrainRootNode ~= nil then
+        cy = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, cx, 0, cz)
+    end
+    Logging.info("[MyTodos] field %s center: (%.1f, %.1f, %.1f)",
+        tostring(arg), cx, cy, cz)
+
+    -- Helper: ruft `obj:method(arg1, arg2, ...)` via pcall und loggt
+    -- Returns. Skipt wenn Methode nicht existiert.
+    local function try(label, obj, method, ...)
+        local fn = obj and obj[method]
+        if type(fn) ~= "function" then
+            Logging.info("[MyTodos]   %s: <no method>", label)
+            return
+        end
+        local ok, r1, r2, r3, r4 = pcall(fn, obj, ...)
+        Logging.info("[MyTodos]   %s: ok=%s r=(%s, %s, %s, %s)",
+            label, tostring(ok),
+            tostring(r1), tostring(r2), tostring(r3), tostring(r4))
+    end
+
+    -- pHMap: probiere mehrere worldPos-Sample-Signaturen
+    if pf.pHMap ~= nil then
+        Logging.info("[MyTodos] === pHMap probes ===")
+        try("pHMap:getMinMaxValue()", pf.pHMap, "getMinMaxValue")
+        try("pHMap:getPhValueFromChangedStates(1)", pf.pHMap, "getPhValueFromChangedStates", 1)
+        try("pHMap:getPhValueFromInternalValue(0)", pf.pHMap, "getPhValueFromInternalValue", 0)
+        try("pHMap:getPhValueAtWorldPos(cx,cz)", pf.pHMap, "getPhValueAtWorldPos", cx, cz)
+        try("pHMap:getValueAtWorldPos(cx,cz)", pf.pHMap, "getValueAtWorldPos", cx, cz)
+        try("pHMap:getInternalValueAtWorldPos(cx,cz)", pf.pHMap, "getInternalValueAtWorldPos", cx, cz)
+    end
+
+    -- nitrogenMap: analog
+    if pf.nitrogenMap ~= nil then
+        Logging.info("[MyTodos] === nitrogenMap probes ===")
+        try("nitrogenMap:getMinMaxValue()", pf.nitrogenMap, "getMinMaxValue")
+        try("nitrogenMap:getNitrogenValueFromInternalValue(0)", pf.nitrogenMap, "getNitrogenValueFromInternalValue", 0)
+        try("nitrogenMap:getNitrogenFromChangedStates(1)", pf.nitrogenMap, "getNitrogenFromChangedStates", 1)
+        try("nitrogenMap:getValueAtWorldPos(cx,cz)", pf.nitrogenMap, "getValueAtWorldPos", cx, cz)
+        try("nitrogenMap:getNitrogenValueAtWorldPos(cx,cz)", pf.nitrogenMap, "getNitrogenValueAtWorldPos", cx, cz)
+        try("nitrogenMap:getInternalValueAtWorldPos(cx,cz)", pf.nitrogenMap, "getInternalValueAtWorldPos", cx, cz)
+    end
+
+    -- soilMap: bodentyp + purchased-Check pro Farmland
+    if pf.soilMap ~= nil then
+        Logging.info("[MyTodos] === soilMap probes ===")
+        try("soilMap:getTypeIndexAtWorldPos(cx,cz)", pf.soilMap, "getTypeIndexAtWorldPos", cx, cz)
+        if field.farmland ~= nil then
+            local fid = field.farmland.id
+            try("soilMap:isSoilMapPurchased(farmland.id)", pf.soilMap, "isSoilMapPurchased", fid)
+            try("soilMap:getIsSoilMapPurchased(farmland.id)", pf.soilMap, "getIsSoilMapPurchased", fid)
+            try("soilMap:isPurchased(farmland.id)", pf.soilMap, "isPurchased", fid)
+        end
+    end
+
+    -- 4. Direkter Density-Map-Zugriff probieren (fuer Polygon-Sampling spaeter)
+    if pf.pHMap ~= nil then
+        Logging.info("[MyTodos] === pHMap density-map attributes ===")
+        for _, attr in ipairs({"densityMapId", "densityMap", "mapId",
+                                "firstChannel", "numChannels",
+                                "firstStateChannel", "numStateChannels",
+                                "internalMinValue", "internalMaxValue",
+                                "minValue", "maxValue"}) do
+            Logging.info("[MyTodos]   pHMap.%s = %s",
+                attr, tostring(pf.pHMap[attr]))
+        end
+    end
+
+    return string.format("PF probed at field %s center - check log", tostring(arg))
+end

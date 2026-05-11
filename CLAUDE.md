@@ -81,6 +81,7 @@ am Ende der jeweiligen Sektion.
 - `mtProbeWeed <fieldId>` — Unkraut-Sampling testen (`getWeedFactor`, `weedSystem.factors`, polygon-Sweep über alle Werte 0..15)
 - `mtProbeHusbandry` — Tier-Placeable-API dumpen: `g_currentMission.placeableSystem.placeables`, eigene Husbandries filtern, alle `spec_husbandry*`-Specs auf Top-Level ausgeben
 - `mtProbeHusbandryDeep` — Tieferer Probe: dumpt die inneren Tabellen (fillLevels, supportedFillTypes, currentPallets, clusterHusbandry, meadow.fillLevels), listet Methoden der `PlaceableHusbandry`- und `clusterHusbandry`-Klassen via Metatable
+- `mtProbePf [fieldNumber]` — Precision-Farming-API dumpen. Top-Level-Keys + Methoden via Metatable fuer alle Sub-Maps (pHMap, nitrogenMap, soilMap, yieldMap, seedRateMap, coverMap, tramlineMap). Mit Feldnummer: spot-samplet pH/N/soilType am Feld-Mittelpunkt via diverser Method-Kandidaten -- `ValueMap.lua` ist von Giants ge-scrubbed, wir muessen via Trial-and-Error finden welche Methodensignaturen wirklich verfuegbar sind.
 - `mtSettings` — Settings-Dialog öffnen (statt Alt+M)
 
 ---
@@ -242,6 +243,39 @@ Spot-Sample-Funktionen `StoneSystem:getStoneLevelAtWorldPos(x,y,z)` / `getStoneS
 
 ---
 
+## Precision Farming (Phase 1+2: pH-aware Kalken)
+
+PF wird via `g_precisionFarming` erkannt (gesetzt vom internen `FS25_precisionFarming`-Mod). Sub-Maps:
+
+- `pHMap` — pH-Werte pro Tile, ersetzt vanilla `limeLevel`
+- `nitrogenMap` — N-Werte + crop-stage-spezifische Bedarfe, ersetzt vanilla `sprayLevel` (noch nicht implementiert, Phase 3)
+- `soilMap` — Bodentyp, Yield-Potenzial. Muss pro Farmland **gekauft** werden (`soilMap:purchaseSoilMaps(farmlandId)`) damit pH/N auslesbar sind
+- `yieldMap`, `seedRateMap`, `coverMap`, `tramlineMap` — Tool-/Visualisierungs-Features, nicht relevant fuer MyTodos
+
+**Wichtig**: `ValueMap.lua` (Basis fuer pHMap/nitrogenMap) ist in `_gameSource` ge-scrubbed — Function-Bodies geleert. Wir kennen Methodennamen nur aus externen Aufrufstellen (z.B. `pHMap:getPhValueFromInternalValue`, `getMinMaxValue`, `getPhValueFromChangedStates`). Fuer worldPos-Sampling muessen wir verschiedene Method-Signaturen probieren -- siehe `mtProbePf` und `MyTodos:initPhSampler`.
+
+**Implementierung in `MyTodosFields.lua`:**
+
+- `initPhSampler()` waehlt zur Init-Zeit eine funktionierende Method-Signatur fuer pH-at-worldPos:
+  1. `pHMap:getPhValueAtWorldPos(x, z)` -- direkter real-pH-Getter (selten)
+  2. `pHMap:getInternalValueAtWorldPos(x, z)` -> `:getPhValueFromInternalValue(raw)`
+  3. `pHMap:getValueAtWorldPos(x, z)` -> `:getPhValueFromInternalValue(raw)`
+  Jeden Kandidaten mit `pcall(fn, m, 0, 0)` testen, erster passender wird gecached.
+- `samplePhAtFieldCenter(field)` -- Spot-Sample am Feld-Mittelpunkt (BBox-Mitte). **Kein Polygon-Sampling** in v1, dazu muessten wir `pHMap.densityMapId`/`firstChannel`/`numChannels` kennen -- Attribute-Namen unbekannt wegen Scrubbing.
+- `limeTaskPf(field)` -- liefert `"Kalk: pH X.X (sauer/stark sauer)"` wenn `samplePh < PH_TARGET_MIN` (Default 6.5). `< 1.0` gilt als "nicht ausgelesen" (Soil-Map nicht gekauft) und gibt nil.
+- In `deriveParallelVanilla`: wenn PF aktiv -> `limeTaskPf(field)`, sonst Vanilla `limeLevel == 0 → "Kalken"`. **Kein Misch-Modus**: vanilla `limeLevel` hat unter PF andere Semantik.
+
+**Schwellen** (Konstanten oben in `MyTodosFields.lua`):
+- `PH_TARGET_MIN = 6.5` -- Trigger fuer "Kalk"-Task
+- `PH_VERY_ACIDIC = 5.5` -- darunter Label-Qualifier "stark sauer"
+
+**Fehlend (Phase 3+)**:
+- N-aware Duengen (crop-stage-spezifisch). Vanilla "Duengen X/2" bleibt aktiv solange PF nicht den N-Task uebernimmt.
+- Polygon-pH-Sampling (genauer als Center-Spot)
+- "Boden-Karte kaufen"-Hinweis fuer noch nicht freigeschaltete Farmlands
+
+---
+
 ## Settings-Menü (echtes GUI für Maus-Decoupling)
 
 Alt+M öffnet einen ScreenElement der über `g_gui:showGui("MyTodosSettingsScreen")` läuft → Engine entkoppelt Maus automatisch (wie ESC-Menü). Im Screen wird das Settings-Panel gezeichnet via `drawSettingsContent()` und Klicks via `handleSettingsClick()` an MyTodos delegiert.
@@ -301,13 +335,20 @@ Discovery + Task-Derivation live (10. Mai 2026). HUD zeigt eine zweite Sektion "
 
 ## Offene Themen / Was wir noch wollten
 
-1. **PrecisionFarming-Pfad**: aktuell fällt PF auf Vanilla-Logik zurück. Echtes PF-Modell (N-Bedarf pro Wachstumsstufe via `g_precisionFarming`, pH-basiertes Kalken) noch nicht gebaut.
+1. **PrecisionFarming Phase 3+**: pH-Kalken ist live (Phase 1+2). Noch offen: N-aware Duengen (crop-stage-spezifisch), Polygon-pH-Sampling statt Center-Spot, "Boden-Karte kaufen"-Hinweis.
 2. **Tier-Husbandries**: siehe oben. Probe läuft, Discovery + Tasks fehlen noch.
 3. **Düngen-Lockout-Persistence**: optional, nice-to-have.
 4. **`weedFactor`-Schwelle**: User hat angemerkt dass `Unkraut` ohne Prozent (weedState=1, weedFactor=0) ggf. nervt — Trigger könnte auf `weedFactor > 0` oder kleine Schwelle geschärft werden.
 5. **PF-Detection**: aktuell wird nach `g_precisionFarming` und ein paar Mod-Namen geguckt — falls `mtRescan` "precision farming: no" ausgibt obwohl PF läuft, in `detectPrecisionFarming()` den korrekten Mod-Folder-Namen ergänzen.
 
-## Stand 11. Mai 2026
+## Stand 11. Mai 2026 (Precision Farming Phase 1+2)
+
+- **PF-Probe-Command `mtProbePf [fieldNumber]`** drin (siehe Doku oben). Dumpt `g_precisionFarming` + alle Sub-Maps mit Methoden via Metatable, optional Spot-Sample diverser pH/N/soilType-Method-Kandidaten am Feld-Mittelpunkt.
+- **pH-aware "Kalk"-Task** ersetzt vanilla "Kalken" wenn PF geladen. `MyTodos:initPhSampler` waehlt zur Runtime die passende `pHMap:get*AtWorldPos`-Methode via Trial-and-Error (Scrubbing-Workaround). `samplePhAtFieldCenter` macht Spot-Sample am Feld-Mittelpunkt. Label-Format: `"Kalk: pH 5.2 (sauer)"` oder `"... (stark sauer)"` bei `<5.5`.
+- **Kein Misch-Modus**: PF an -> nur PF-pH-Logik, PF aus -> nur vanilla `limeLevel == 0`. Vanilla limeLevel hat unter PF andere Semantik.
+- **Noch nicht implementiert** in dieser Phase: Polygon-pH-Sampling (nur Center-Spot), N-aware Duengen, "Boden-Karte kaufen"-Task.
+
+## Stand 11. Mai 2026 (HUD-Anker)
 
 - **HUD-Position + Schriftgroesse dynamisch an Giants' InputHelpDisplay angehaengt** (`MyTodos:getHudMetrics` in `MyTodos.lua`). Kein Drag mehr, keine persistierte hudX/hudY. F1-Toggle blendet das Giants-Hilfepanel aus, MyTodos bleibt aber an derselben Stelle (Geometrie + `inputHelp.textSize` werden auch im invisible-State gepflegt). Body-Font = `inputHelp.textSize` (= `scalePixelToScreenHeight(12)`), Title = `* HUD_TITLE_SCALE`. Pro-Sektion-Zeilencap statt geteiltes Budget (`HUD_MAX_FIELD_LINES = 14`, `HUD_MAX_HUSB_LINES = 8`).
 - **Neue Action `MYTODOS_TOGGLE_HUD`** (Default `RShift+T`) blendet das HUD an/aus. Setting `hudVisible` (bool, persistiert in `MyTodos.xml`) als Fallback im Settings-Dialog.

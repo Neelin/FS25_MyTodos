@@ -39,6 +39,19 @@ MyTodos.WEED_MIN_PIXELS = 50
 MyTodos.WEED_MIN_FRACTION = 0.01
 MyTodos.WEED_TOTAL_MIN_FACTOR = 0.05
 
+-- Precision-Farming pH-Schwellen. Wenn PF geladen ist, ersetzt das den
+-- Vanilla-Kalken-Task. pH wird via pHMap im worldPos-Spot-Sample am
+-- Feld-Mittelpunkt gelesen (Polygon-Sampling waere genauer, aber dazu
+-- muessten wir an pHMap.densityMapId rankommen -- ValueMap ist in
+-- _gameSource ge-scrubbed, dazu spaeter mehr).
+--
+-- pH-Skala in FS25 ist typischerweise 4.0-9.0, Optimum 6.5-7.0.
+-- Wir triggern "Kalk"-Task wenn pH unter PH_TARGET_MIN faellt.
+MyTodos.PH_TARGET_MIN = 6.5
+-- pH-Werte unter dieser Schwelle gelten als "stark sauer" und kriegen
+-- ein deutlicheres Label.
+MyTodos.PH_VERY_ACIDIC = 5.5
+
 -- Discovery --------------------------------------------------------
 
 function MyTodos:getLocalFarmId()
@@ -388,6 +401,100 @@ function MyTodos:sampleWeedForField(field, fieldId)
     return { state = highestState, factor = factor }
 end
 
+-- pH-Sampler (Precision Farming) -----------------------------------
+--
+-- Liefert pH-Wert am Feld-Mittelpunkt via pHMap. Wegen ge-scrubbter
+-- ValueMap-Klasse in _gameSource kennen wir die genaue Methodensignatur
+-- nicht von vornherein -- in `initPhSampler` probieren wir mehrere
+-- Kandidaten durch und cachen die funktionierende als Closure.
+--
+-- Konvertierung: manche Getter liefern die "internal" density-map-Werte
+-- (0..MaxValue), andere bereits den realen pH. Wir erkennen das durch
+-- Wertebereich-Check beim Init.
+
+function MyTodos:initPhSampler()
+    if self.phSamplerReady ~= nil then return self.phSampleFn ~= nil end
+    self.phSamplerReady = true
+    self.phSampleFn = nil
+
+    local pf = g_precisionFarming
+    if pf == nil or pf.pHMap == nil then
+        return false
+    end
+    local m = pf.pHMap
+    local hasConverter = type(m.getPhValueFromInternalValue) == "function"
+
+    -- Kandidaten in Reihenfolge "wahrscheinlich am direktesten":
+    -- 1. Direkter pH-Getter (selten)
+    -- 2. Generischer Value-Getter -> via Konverter zu real-pH
+    local candidates = {
+        { name = "getPhValueAtWorldPos",       needsConvert = false },
+        { name = "getInternalValueAtWorldPos", needsConvert = true  },
+        { name = "getValueAtWorldPos",         needsConvert = true  },
+    }
+    for _, cand in ipairs(candidates) do
+        local fn = m[cand.name]
+        if type(fn) == "function" and (not cand.needsConvert or hasConverter) then
+            -- Sanity-Test: feuert die Methode ueberhaupt ohne Crash?
+            local ok, v = pcall(fn, m, 0, 0)
+            if ok and type(v) == "number" then
+                local sampler
+                if cand.needsConvert then
+                    sampler = function(x, z)
+                        local ok1, raw = pcall(fn, m, x, z)
+                        if not ok1 or type(raw) ~= "number" then return nil end
+                        local ok2, ph = pcall(m.getPhValueFromInternalValue, m, raw)
+                        if not ok2 or type(ph) ~= "number" then return nil end
+                        return ph
+                    end
+                else
+                    sampler = function(x, z)
+                        local ok1, ph = pcall(fn, m, x, z)
+                        if not ok1 or type(ph) ~= "number" then return nil end
+                        return ph
+                    end
+                end
+                self.phSampleFn = sampler
+                Logging.info("[MyTodos] pH sampler ready via pHMap:%s (convert=%s)",
+                    cand.name, tostring(cand.needsConvert))
+                return true
+            end
+        end
+    end
+    Logging.info("[MyTodos] pH sampler: no usable worldPos getter on pHMap")
+    return false
+end
+
+-- Liefert pH am Feld-Mittelpunkt oder nil.
+function MyTodos:samplePhAtFieldCenter(field)
+    if not self:initPhSampler() then return nil end
+    local pp = field and field.polygonPoints
+    if type(pp) ~= "table" or #pp == 0 then return nil end
+    local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+    for _, nodeId in ipairs(pp) do
+        local x, _, z = getWorldTranslation(nodeId)
+        if x < minX then minX = x end
+        if x > maxX then maxX = x end
+        if z < minZ then minZ = z end
+        if z > maxZ then maxZ = z end
+    end
+    local cx, cz = (minX + maxX) / 2, (minZ + maxZ) / 2
+    return self.phSampleFn(cx, cz)
+end
+
+-- Liefert "Kalk: pH X.X (qualifier)"-Label oder nil wenn nichts zu tun.
+-- nil heisst auch: PF nicht da / Soil-Map nicht gekauft / pH okay.
+function MyTodos:limeTaskPf(field)
+    if g_precisionFarming == nil then return nil end
+    local ph = self:samplePhAtFieldCenter(field)
+    -- Werte unter 1.0 sind in der Praxis "nicht ausgelesen" (Soil-Map
+    -- nicht gekauft, oder Feldmittelpunkt ist nicht auf Soil-Tile).
+    if ph == nil or ph < 1.0 then return nil end
+    if ph >= MyTodos.PH_TARGET_MIN then return nil end
+    local qualifier = (ph < MyTodos.PH_VERY_ACIDIC) and "stark sauer" or "sauer"
+    return string.format("Kalk: pH %.1f (%s)", ph, qualifier)
+end
+
 -- Field history (Duengen-Lockout) ----------------------------------
 
 function MyTodos:updateFieldHistory(fieldId, fs)
@@ -668,10 +775,20 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
         end
     end
 
-    -- Kalken: limeLevel==0; bei regrowing/non-consuming Fruechten nutzlos
-    if (fs.limeLevel or 0) == 0 then
-        local limeBenefits = (fruit == nil) or (fruit.consumesLime ~= false)
-        if limeBenefits then
+    -- Kalken: bei regrowing/non-consuming Fruechten ueberspringen
+    -- (Gras profitiert nicht). Bei PF (Precision Farming) lesen wir den
+    -- realen pH-Wert vom pHMap-Spot-Sample und triggern nur wenn unter
+    -- Zielbereich. Ohne PF fallen wir zurueck auf Vanilla limeLevel==0.
+    -- Bewusst kein Misch-Verhalten: wenn PF an, kein Vanilla-Fallback,
+    -- denn vanilla limeLevel hat unter PF andere Semantik.
+    local limeBenefits = (fruit == nil) or (fruit.consumesLime ~= false)
+    if limeBenefits then
+        if g_precisionFarming ~= nil then
+            local pfTask = self:limeTaskPf(field)
+            if pfTask ~= nil then
+                table.insert(out, pfTask)
+            end
+        elseif (fs.limeLevel or 0) == 0 then
             table.insert(out, "Kalken")
         end
     end
