@@ -110,7 +110,10 @@ function MyTodos:onMapLoaded()
         g_currentMission:addUpdateable(self)
     end
 
-    self:registerActionEvents()
+    -- registerActionEvents NICHT hier aufrufen -- Giants resettet den
+    -- Input-Context bei jedem On-Foot/Vehicle-Wechsel. Stattdessen via
+    -- PlayerInputComponent.registerGlobalPlayerActionEvents Hook (siehe
+    -- unten), der bei jedem Context-Aufbau feuert.
     self:updateMouseCursor()
 end
 
@@ -683,3 +686,15 @@ end)
 BaseMission.draw = Utils.appendedFunction(BaseMission.draw, function(mission)
     MyTodos:draw()
 end)
+
+-- Action-Events muessen JEDES MAL neu registriert werden wenn Giants den
+-- Input-Context aufbaut (on-foot <-> vehicle, GUI auf/zu, ...). Sonst sind
+-- die Bindings zwar im Preferences-Menue sichtbar, feuern aber nicht.
+-- Pattern wie in FS25_FarmlandOverview.
+if PlayerInputComponent ~= nil then
+    PlayerInputComponent.registerGlobalPlayerActionEvents = Utils.appendedFunction(
+        PlayerInputComponent.registerGlobalPlayerActionEvents,
+        function(playerInput, controlling)
+            MyTodos:registerActionEvents()
+        end)
+end
