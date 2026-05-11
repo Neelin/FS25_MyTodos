@@ -717,10 +717,62 @@ addConsoleCommand("mtProbePf",
     "Probe Precision Farming API. Usage: mtProbePf [fieldNumber]",
     "consoleProbePfCmd", MyTodos)
 function MyTodos:consoleProbePfCmd(arg)
-    local pf = g_precisionFarming
-    if pf == nil then
-        return "g_precisionFarming nil - Precision Farming ist nicht aktiv"
+    -- Stage 1: PF-Instanz an verschiedenen moeglichen Stellen suchen.
+    -- Manche FS25-Setups parken die nicht in _G.g_precisionFarming sondern
+    -- in g_currentMission, g_modManager.mods[...] o.ae.
+    local function findPfInstance()
+        if g_precisionFarming ~= nil then
+            return g_precisionFarming, "_G.g_precisionFarming"
+        end
+        if g_currentMission ~= nil then
+            if g_currentMission.precisionFarming ~= nil then
+                return g_currentMission.precisionFarming, "g_currentMission.precisionFarming"
+            end
+            if g_currentMission.g_precisionFarming ~= nil then
+                return g_currentMission.g_precisionFarming, "g_currentMission.g_precisionFarming"
+            end
+        end
+        if g_modManager ~= nil and type(g_modManager.getMod) == "function" then
+            for _, name in ipairs({"FS25_precisionFarming", "FS25_PrecisionFarming"}) do
+                local ok, m = pcall(g_modManager.getMod, g_modManager, name)
+                if ok and m ~= nil then
+                    -- m ist meist ein ModDescriptor, suche darin nach PF-Instanz
+                    if type(m) == "table" then
+                        for k, v in pairs(m) do
+                            if type(v) == "table" and v.pHMap ~= nil then
+                                return v, "g_modManager.mods." .. name .. "." .. tostring(k)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        -- Brute-force: scan top-level globals fuer was mit pHMap drin
+        for k, v in pairs(_G) do
+            if type(v) == "table" and rawget(v, "pHMap") ~= nil
+                    and rawget(v, "nitrogenMap") ~= nil then
+                return v, "_G." .. tostring(k)
+            end
+        end
+        return nil, nil
     end
+
+    local pf, pfLocation = findPfInstance()
+    if pf == nil then
+        Logging.info("[MyTodos] PF probe: instance not found in any known location.")
+        Logging.info("[MyTodos] checked: _G.g_precisionFarming, g_currentMission.precisionFarming, g_modManager.mods[FS25_precisionFarming].*, brute-force _G scan for {pHMap, nitrogenMap}")
+        Logging.info("[MyTodos] g_modIsLoaded[FS25_precisionFarming] = %s",
+            tostring(g_modIsLoaded and g_modIsLoaded["FS25_precisionFarming"]))
+        if g_modManager ~= nil and g_modManager.mods ~= nil then
+            for k, _ in pairs(g_modManager.mods) do
+                if tostring(k):lower():find("precision") then
+                    Logging.info("[MyTodos] g_modManager.mods[%s] exists", tostring(k))
+                end
+            end
+        end
+        return "PF instance not found - see log for diagnostics"
+    end
+    Logging.info("[MyTodos] PF probe: instance found at %s", tostring(pfLocation))
 
     -- 1. Top-level Keys
     self:dumpKeys("g_precisionFarming", pf)
