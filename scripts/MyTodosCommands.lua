@@ -795,31 +795,90 @@ function MyTodos:consoleProbePfCmd(arg)
                 Logging.info("[MyTodos] g_modManager.mods has %d entries", count)
             end
         end
-        Logging.info("[MyTodos] === Spieler-Fahrzeug Probe ===")
-        local vehicle = nil
-        if g_currentMission and g_currentMission.controlledVehicle ~= nil then
-            vehicle = g_currentMission.controlledVehicle
-        end
-        if vehicle ~= nil then
-            Logging.info("[MyTodos] controlledVehicle present, scanning spec_* keys...")
+        Logging.info("[MyTodos] === Fahrzeug + angehaengte Implements Probe ===")
+        local function probeVehicleForPfSpec(vehicle, label)
+            if vehicle == nil or type(vehicle) ~= "table" then return end
             for k, v in pairs(vehicle) do
                 local ks = tostring(k)
-                if ks:find("^spec_") and ks:lower():find("sprayer") then
-                    Logging.info("[MyTodos] vehicle.%s exists (%s)", ks, type(v))
-                    if type(v) == "table" then
-                        for sk, sv in pairs(v) do
-                            local sks = tostring(sk)
-                            if sks:find("Map") or sks:find("pH") or sks:find("nitrogen")
-                                    or sks:find("soil") then
-                                Logging.info("[MyTodos]   %s.%s = <%s>",
-                                    ks, sks, type(sv))
+                if ks:find("^spec_") and type(v) == "table" then
+                    -- Suche nach pHMap/nitrogenMap/soilMap direkt im Spec
+                    local hits = {}
+                    for sk, sv in pairs(v) do
+                        local sks = tostring(sk)
+                        if sks == "pHMap" or sks == "nitrogenMap" or sks == "soilMap"
+                                or sks == "yieldMap" or sks == "coverMap" then
+                            table.insert(hits, string.format("%s=<%s>", sks, type(sv)))
+                        end
+                    end
+                    if #hits > 0 then
+                        Logging.info("[MyTodos] [%s] %s has PF-attrs: %s",
+                            label, ks, table.concat(hits, ", "))
+                        -- Dump die ganze Spec-Keys + besonders pHMap-Metatable
+                        self:dumpKeys("  spec keys", v)
+                        if v.pHMap ~= nil then
+                            self:dumpKeys("  spec.pHMap keys", v.pHMap)
+                            local mt = getmetatable(v.pHMap)
+                            if mt ~= nil and mt.__index then
+                                local fns = {}
+                                for mk, mv in pairs(mt.__index) do
+                                    if type(mv) == "function" then table.insert(fns, mk) end
+                                end
+                                table.sort(fns)
+                                Logging.info("[MyTodos]   pHMap methods: %s",
+                                    table.concat(fns, ", "))
                             end
                         end
                     end
                 end
             end
+        end
+
+        local controlled = g_currentMission and g_currentMission.controlledVehicle or nil
+        if controlled == nil then
+            Logging.info("[MyTodos] no controlledVehicle")
         else
-            Logging.info("[MyTodos] no controlledVehicle (steig in einen Sprayer und probiere nochmal)")
+            probeVehicleForPfSpec(controlled, "controlledVehicle")
+            -- Angehaengte Implements via attacherJoints
+            local aj = controlled.spec_attacherJoints
+            if aj ~= nil and type(aj.attachedImplements) == "table" then
+                Logging.info("[MyTodos] %d attached implement(s)", #aj.attachedImplements)
+                for i, impl in ipairs(aj.attachedImplements) do
+                    if impl.object ~= nil then
+                        probeVehicleForPfSpec(impl.object,
+                            string.format("attached[%d]", i))
+                    end
+                end
+            else
+                Logging.info("[MyTodos] no spec_attacherJoints / attachedImplements")
+            end
+        end
+
+        -- Fallback: scan alle Fahrzeuge der Welt nach erstem PF-Sprayer.
+        -- g_currentMission.vehicleSystem ist in FS25 die zentrale Liste.
+        local vsys = g_currentMission and g_currentMission.vehicleSystem
+        if vsys ~= nil and type(vsys.vehicles) == "table" then
+            local n = #vsys.vehicles
+            Logging.info("[MyTodos] g_currentMission.vehicleSystem.vehicles: %d entries -- scanning first 30 for PF-spec",
+                n)
+            local scanned = 0
+            local found = 0
+            for _, veh in ipairs(vsys.vehicles) do
+                scanned = scanned + 1
+                if scanned > 30 then break end
+                for k, v in pairs(veh) do
+                    local ks = tostring(k)
+                    if ks:find("^spec_") and type(v) == "table" and v.pHMap ~= nil then
+                        Logging.info("[MyTodos] vehicleSystem[%s] type %s has %s.pHMap",
+                            tostring(scanned), tostring(veh.typeName or "?"), ks)
+                        found = found + 1
+                        if found == 1 then
+                            self:dumpKeys("  first-hit spec.pHMap", v.pHMap)
+                        end
+                        break
+                    end
+                end
+            end
+            Logging.info("[MyTodos] scanned %d vehicles, %d had PF spec", scanned, found)
         end
         Logging.info("[MyTodos] g_modIsLoaded[FS25_precisionFarming] = %s",
             tostring(g_modIsLoaded and g_modIsLoaded["FS25_precisionFarming"]))
