@@ -760,17 +760,70 @@ function MyTodos:consoleProbePfCmd(arg)
     local pf, pfLocation = findPfInstance()
     if pf == nil then
         Logging.info("[MyTodos] PF probe: instance not found in any known location.")
-        Logging.info("[MyTodos] checked: _G.g_precisionFarming, g_currentMission.precisionFarming, g_modManager.mods[FS25_precisionFarming].*, brute-force _G scan for {pHMap, nitrogenMap}")
-        Logging.info("[MyTodos] g_modIsLoaded[FS25_precisionFarming] = %s",
-            tostring(g_modIsLoaded and g_modIsLoaded["FS25_precisionFarming"]))
-        if g_modManager ~= nil and g_modManager.mods ~= nil then
-            for k, _ in pairs(g_modManager.mods) do
-                if tostring(k):lower():find("precision") then
-                    Logging.info("[MyTodos] g_modManager.mods[%s] exists", tostring(k))
+        Logging.info("[MyTodos] === Forensik: alle _G-Keys mit 'precision' oder 'PF' ===")
+        for k, v in pairs(_G) do
+            local ks = tostring(k):lower()
+            if ks:find("precision") or ks:find("phmap") or ks:find("nitrogenmap")
+                    or ks:find("soilmap") or ks == "valuemap" then
+                Logging.info("[MyTodos]   _G.%s = <%s>", tostring(k), type(v))
+                if type(v) == "table" then
+                    self:dumpKeys("    " .. tostring(k), v)
+                    local mt = getmetatable(v)
+                    if mt ~= nil and mt.__index then
+                        local fns = {}
+                        for mk, mv in pairs(mt.__index) do
+                            if type(mv) == "function" then table.insert(fns, mk) end
+                        end
+                        table.sort(fns)
+                        Logging.info("[MyTodos]     %s metatable methods: %s",
+                            tostring(k), table.concat(fns, ", "))
+                    end
                 end
             end
         end
-        return "PF instance not found - see log for diagnostics"
+        Logging.info("[MyTodos] === g_modManager state ===")
+        if g_modManager ~= nil then
+            self:dumpKeys("g_modManager", g_modManager)
+            if g_modManager.mods ~= nil then
+                local count = 0
+                for k, _ in pairs(g_modManager.mods) do
+                    count = count + 1
+                    if tostring(k):lower():find("precision") then
+                        Logging.info("[MyTodos] g_modManager.mods[%s] exists", tostring(k))
+                    end
+                end
+                Logging.info("[MyTodos] g_modManager.mods has %d entries", count)
+            end
+        end
+        Logging.info("[MyTodos] === Spieler-Fahrzeug Probe ===")
+        local vehicle = nil
+        if g_currentMission and g_currentMission.controlledVehicle ~= nil then
+            vehicle = g_currentMission.controlledVehicle
+        end
+        if vehicle ~= nil then
+            Logging.info("[MyTodos] controlledVehicle present, scanning spec_* keys...")
+            for k, v in pairs(vehicle) do
+                local ks = tostring(k)
+                if ks:find("^spec_") and ks:lower():find("sprayer") then
+                    Logging.info("[MyTodos] vehicle.%s exists (%s)", ks, type(v))
+                    if type(v) == "table" then
+                        for sk, sv in pairs(v) do
+                            local sks = tostring(sk)
+                            if sks:find("Map") or sks:find("pH") or sks:find("nitrogen")
+                                    or sks:find("soil") then
+                                Logging.info("[MyTodos]   %s.%s = <%s>",
+                                    ks, sks, type(sv))
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            Logging.info("[MyTodos] no controlledVehicle (steig in einen Sprayer und probiere nochmal)")
+        end
+        Logging.info("[MyTodos] g_modIsLoaded[FS25_precisionFarming] = %s",
+            tostring(g_modIsLoaded and g_modIsLoaded["FS25_precisionFarming"]))
+        return "PF instance not found - detailed forensic log written"
     end
     Logging.info("[MyTodos] PF probe: instance found at %s", tostring(pfLocation))
 
