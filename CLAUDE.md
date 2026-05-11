@@ -19,24 +19,55 @@ Das Tool ist eine **Erinnerungs-Liste für erfahrene Spieler**, keine Schritt-f�
 
 ## Architektur
 
-- `modDesc.xml` — Mod-Manifest, registriert alle Lua-Files + Action `MYTODOS_TOGGLE_SETTINGS` (Default-Binding `Alt+M`)
-- `scripts/MyTodos.lua` — Bootstrap, Lifecycle, HUD-Drawing, Settings-Persistenz, Maus-Drag, Hooks. Definiert die globale `MyTodos`-Tabelle, alle anderen Files erweitern sie.
+- `modDesc.xml` — Mod-Manifest, registriert alle Lua-Files + zwei Actions:
+  `MYTODOS_TOGGLE_SETTINGS` (Default `Alt+M`) oeffnet/schliesst Settings-Dialog,
+  `MYTODOS_TOGGLE_HUD` (Default `RShift+T`) blendet das HUD an/aus.
+- `scripts/MyTodos.lua` — Bootstrap, Lifecycle, HUD-Drawing, Settings-Persistenz, Hooks. Definiert die globale `MyTodos`-Tabelle, alle anderen Files erweitern sie.
 - `scripts/MyTodosFields.lua` — Field-Discovery, Task-Derivation (vanilla), alle 3 Density-Map-Sampler (Windrow, Stone, Weed), Düngen-Lockout-History
 - `scripts/MyTodosHusbandry.lua` — Tier-Husbandries. Aktuell nur Probe-Logik, echte Discovery + Tasks kommen.
 - `scripts/MyTodosCommands.lua` — alle `mt*`-Konsolenbefehle
 - `scripts/MyTodosSettingsScreen.lua` — minimaler ScreenElement-Subclass für das Settings-Menü als echter GUI (entkoppelt Maus von Kamera wie ESC)
 - `config/MyTodosSettingsScreen.xml` — minimal-XML für den ScreenElement
-- Settings-Persistence: `<UserProfileApp>/modSettings/MyTodos.xml` (HUD-Position + Toggles)
+- Settings-Persistence: `<UserProfileApp>/modSettings/MyTodos.xml` (nur Toggles + Schwellwerte. HUD-Position wird NICHT persistiert weil dynamisch aus InputHelp-Anker abgeleitet.)
 
 **File-Split-Konvention**: alle Files erweitern dieselbe `MyTodos`-Tabelle via `function MyTodos:foo()`. Die Tabelle wird in `MyTodos.lua` als `MyTodos = {}` initialisiert — alle anderen Files müssen in `modDesc.xml` danach gelistet sein. Console-Commands haben Callback-Method-Namen als String, die werden erst zur Aufrufzeit aufgelöst, daher Reihenfolge dort egal.
 
 ## Hooks
 
 - `Mission00.load` → `onMissionLoaded` (server/client flags)
-- `BaseMission.loadMapFinished` → `onMapLoaded` (registriert Updateable, Action, GUI)
+- `BaseMission.loadMapFinished` → `onMapLoaded` (registriert Updateable, Actions, GUI)
 - `BaseMission.draw` → HUD zeichnen
-- `BaseMission.mouseEvent` → HUD-Drag wenn "HUD bewegbar" Setting an
 - `g_currentMission:addUpdateable(self)` → Update-Tick für Polling
+
+## HUD-Anker + Schriftgroesse (alles aus InputHelp)
+
+Position UND Body-Schriftgroesse werden pro Frame dynamisch aus Giants'
+`InputHelpDisplay` abgeleitet (das F1-Hilfepanel oben links). Eine
+Funktion liefert beides: `MyTodos:getHudMetrics()`.
+
+- `g_currentMission.hud.inputHelp:getPosition()` → linke obere Ecke des
+  Hilfepanels
+- `inputHelp.lineBg.width` → Breite einer Hilfezeile (3-slice background,
+  von Giants in `storeScaledValues` auf 330px-skaliert gesetzt)
+- `inputHelp.textSize` → Body-Schriftgroesse, Giants berechnet
+  `self.textSize = self:scalePixelToScreenHeight(12)` -> skaliert mit
+  UI-Scale-Setting und Aufloesung. MyTodos uebernimmt 1:1, Title ist
+  `textSize * HUD_TITLE_SCALE` (1.15) und fett.
+- MyTodos linke obere Ecke = `(posX + width + HUD_ANCHOR_MARGIN_X, posY)`
+- Fallback wenn inputHelp/lineBg/textSize noch nicht initialisiert:
+  `g_hudAnchorLeft + margin, g_hudAnchorTop, HUD_FALLBACK_TEXT_SIZE`
+- **Kein Visibility-Check**: F1 setzt nur `setVisible(false)`, die Geometrie
+  + textSize bleiben gepflegt. So springt MyTodos nicht an die linke
+  Bildschirmkante wenn der Spieler die Hilfe ausblendet.
+
+HUD an/aus wird ausschliesslich ueber `MYTODOS_TOGGLE_HUD` (Default
+`RShift+T`) oder den `hudVisible`-Toggle im Settings-Dialog gesteuert.
+Persistiert in `MyTodos.xml`.
+
+**Zeilen-Budget**: pro Sektion ein eigenes Cap. `HUD_MAX_FIELD_LINES = 14`,
+`HUD_MAX_HUSB_LINES = 8`. Verhindert dass eine grosse Sektion (z.B. 20
+Felder) die andere komplett auffrisst. Bei Ueberlauf "(+N weitere)"-Zeile
+am Ende der jeweiligen Sektion.
 
 ## Konsolen-Befehle (zum Debuggen)
 
@@ -51,7 +82,6 @@ Das Tool ist eine **Erinnerungs-Liste für erfahrene Spieler**, keine Schritt-f�
 - `mtProbeHusbandry` — Tier-Placeable-API dumpen: `g_currentMission.placeableSystem.placeables`, eigene Husbandries filtern, alle `spec_husbandry*`-Specs auf Top-Level ausgeben
 - `mtProbeHusbandryDeep` — Tieferer Probe: dumpt die inneren Tabellen (fillLevels, supportedFillTypes, currentPallets, clusterHusbandry, meadow.fillLevels), listet Methoden der `PlaceableHusbandry`- und `clusterHusbandry`-Klassen via Metatable
 - `mtSettings` — Settings-Dialog öffnen (statt Alt+M)
-- `mtResetHud` — HUD-Position auf Default zurück
 
 ---
 
@@ -217,10 +247,12 @@ Spot-Sample-Funktionen `StoneSystem:getStoneLevelAtWorldPos(x,y,z)` / `getStoneS
 Alt+M öffnet einen ScreenElement der über `g_gui:showGui("MyTodosSettingsScreen")` läuft → Engine entkoppelt Maus automatisch (wie ESC-Menü). Im Screen wird das Settings-Panel gezeichnet via `drawSettingsContent()` und Klicks via `handleSettingsClick()` an MyTodos delegiert.
 
 Toggles:
-- `hudMovable` — wenn an, LMB+Drag auf HUD verschiebt es (Maus-Cursor sichtbar, Kamera dreht aber noch — die Camera-Decoupling à la Courseplay haben wir nicht implementiert)
-- `playerMouse` — Maus-Cursor immer sichtbar
+- `hudVisible` — gleicher Effekt wie `RShift+T`. Nur als Settings-Fallback drin falls dem User die Tastenbelegung nicht mehr einfaellt.
+- Schwellwerte fuer Tier-Tasks (percent, siehe `SETTING_DEFS`).
 
-HUD-Position (hudX/hudY) wird beim Drag-End oder Settings-Close in modSettings/MyTodos.xml persistiert.
+HUD-Position wird nicht persistiert — kommt dynamisch aus
+`g_currentMission.hud.inputHelp`-Geometrie (siehe Abschnitt "HUD-Position
+(Anker statt Drag)" oben).
 
 ---
 
@@ -271,10 +303,17 @@ Discovery + Task-Derivation live (10. Mai 2026). HUD zeigt eine zweite Sektion "
 
 1. **PrecisionFarming-Pfad**: aktuell fällt PF auf Vanilla-Logik zurück. Echtes PF-Modell (N-Bedarf pro Wachstumsstufe via `g_precisionFarming`, pH-basiertes Kalken) noch nicht gebaut.
 2. **Tier-Husbandries**: siehe oben. Probe läuft, Discovery + Tasks fehlen noch.
-3. **HUD-Drag mit Camera-Lock** (analog Courseplay's `setCameraRotation`): aktuell dreht der Kopf beim Verschieben mit. Niedrige Prio.
-4. **Düngen-Lockout-Persistence**: optional, nice-to-have.
-5. **`weedFactor`-Schwelle**: User hat angemerkt dass `Unkraut` ohne Prozent (weedState=1, weedFactor=0) ggf. nervt — Trigger könnte auf `weedFactor > 0` oder kleine Schwelle geschärft werden.
-6. **PF-Detection**: aktuell wird nach `g_precisionFarming` und ein paar Mod-Namen geguckt — falls `mtRescan` "precision farming: no" ausgibt obwohl PF läuft, in `detectPrecisionFarming()` den korrekten Mod-Folder-Namen ergänzen.
+3. **Düngen-Lockout-Persistence**: optional, nice-to-have.
+4. **`weedFactor`-Schwelle**: User hat angemerkt dass `Unkraut` ohne Prozent (weedState=1, weedFactor=0) ggf. nervt — Trigger könnte auf `weedFactor > 0` oder kleine Schwelle geschärft werden.
+5. **PF-Detection**: aktuell wird nach `g_precisionFarming` und ein paar Mod-Namen geguckt — falls `mtRescan` "precision farming: no" ausgibt obwohl PF läuft, in `detectPrecisionFarming()` den korrekten Mod-Folder-Namen ergänzen.
+
+## Stand 11. Mai 2026
+
+- **HUD-Position + Schriftgroesse dynamisch an Giants' InputHelpDisplay angehaengt** (`MyTodos:getHudMetrics` in `MyTodos.lua`). Kein Drag mehr, keine persistierte hudX/hudY. F1-Toggle blendet das Giants-Hilfepanel aus, MyTodos bleibt aber an derselben Stelle (Geometrie + `inputHelp.textSize` werden auch im invisible-State gepflegt). Body-Font = `inputHelp.textSize` (= `scalePixelToScreenHeight(12)`), Title = `* HUD_TITLE_SCALE`. Pro-Sektion-Zeilencap statt geteiltes Budget (`HUD_MAX_FIELD_LINES = 14`, `HUD_MAX_HUSB_LINES = 8`).
+- **Neue Action `MYTODOS_TOGGLE_HUD`** (Default `RShift+T`) blendet das HUD an/aus. Setting `hudVisible` (bool, persistiert in `MyTodos.xml`) als Fallback im Settings-Dialog.
+- **Entfernt**: `hudMovable`/`playerMouse` Settings, Mouse-Drag-Handler (`MyTodos:mouseEvent`, `MyTodos:isMouseOverPanel`), `BaseMission.mouseEvent`-Hook, Konsolenbefehl `mtResetHud`, `HUD_DEFAULT_X/Y` Konstanten, `HUD_EDIT_BG_COLOR`.
+- HUD-Text jetzt links-buendig (war vorher zentriert, passt zum Anker oben-links).
+- `mtDump`/`mtForceUpdate`/`mtProbe*` interpretieren `<fieldNumber>` jetzt als User-facing Map-Nummer via `MyTodos:resolveFieldByUserNumber` (matched gegen `field.farmland.name`).
 
 ## Letzter Stand (10. Mai 2026)
 

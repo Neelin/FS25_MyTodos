@@ -1,9 +1,16 @@
 --
 -- MyTodos
 --
--- Bootstrap, Lifecycle-Hooks, HUD-Drawing, Settings-Persistenz und
--- Maus-Drag. Field-Logik liegt in MyTodosFields.lua, Husbandry in
+-- Bootstrap, Lifecycle-Hooks, HUD-Drawing und Settings-Persistenz.
+-- Field-Logik liegt in MyTodosFields.lua, Husbandry in
 -- MyTodosHusbandry.lua, Konsolenbefehle in MyTodosCommands.lua.
+--
+-- Position: das HUD ankert dynamisch an Giants' InputHelpDisplay
+-- (das F1-Hilfepanel oben links). MyTodos zeichnet sich rechts davon
+-- mit kleinem Abstand, mit demselben Top-Y. Wenn der Spieler F1
+-- drueckt und das Hilfepanel ausblendet, bleibt MyTodos an derselben
+-- Bildschirmposition kleben (Geometrie wird unabhaengig vom Visible
+-- State gepflegt).
 --
 
 MyTodos = {}
@@ -14,15 +21,25 @@ MyTodos.VERSION = "0.0.1"
 MyTodos.SCAN_TIMEOUT_MS = 30000
 MyTodos.RESCAN_INTERVAL_MS = 5000
 
-MyTodos.HUD_DEFAULT_X = 0.5
-MyTodos.HUD_DEFAULT_Y = 0.97
-MyTodos.HUD_TEXT_SIZE = 0.012
-MyTodos.HUD_TITLE_SIZE = 0.014
+-- Abstand zwischen InputHelp-rechte-Kante und MyTodos-linke-Kante
+-- (normalisierte Screen-Koords).
+MyTodos.HUD_ANCHOR_MARGIN_X = 0.005
+
+-- Font-Groessen: Body-Text uebernimmt 1:1 die Groesse die Giants' InputHelp
+-- gerade nutzt (in `inputHelp.textSize` per `scalePixelToScreenHeight(12)`
+-- berechnet, skaliert also mit UI-Scale und Aufloesung). Title nochmal etwas
+-- groesser fuer optische Hierarchie. Fallback nur falls InputHelp beim
+-- ersten Draw noch nicht initialisiert ist.
+MyTodos.HUD_TITLE_SCALE = 1.15
+MyTodos.HUD_FALLBACK_TEXT_SIZE = 0.010
 MyTodos.HUD_LINE_SPACING = 1.4
-MyTodos.HUD_PAD_X = 0.012
-MyTodos.HUD_PAD_Y = 0.005
+MyTodos.HUD_PAD_X = 0.010
+MyTodos.HUD_PAD_Y = 0.004
 MyTodos.HUD_MIN_WIDTH = 0.16
-MyTodos.HUD_MAX_LINES = 12
+-- Pro Sektion ein eigenes Zeilen-Budget. Sonst frisst eine sehr lange
+-- Sektion (z.B. 20 Felder) die andere komplett auf.
+MyTodos.HUD_MAX_FIELD_LINES = 14
+MyTodos.HUD_MAX_HUSB_LINES = 8
 
 MyTodos.SETTINGS_X = 0.5
 MyTodos.SETTINGS_Y = 0.7
@@ -35,7 +52,6 @@ MyTodos.SETTINGS_MIN_WIDTH = 0.22
 
 MyTodos.HUD_BG_COLOR        = { 0,    0,    0,    0.75 }
 MyTodos.HUD_HEADER_COLOR    = { 0.20, 0.40, 0.05, 0.95 }
-MyTodos.HUD_EDIT_BG_COLOR   = { 1.0,  0.7,  0.0,  0.18 }
 MyTodos.HUD_TEXT_COLOR      = { 1,    1,    1,    1 }
 MyTodos.HUD_DIM_COLOR       = { 0.78, 0.78, 0.78, 1 }
 MyTodos.HUD_HEADER_TEXT     = { 1,    1,    1,    1 }
@@ -51,8 +67,10 @@ MyTodos.PERCENT_MIN = 5
 MyTodos.PERCENT_MAX = 95
 
 MyTodos.SETTING_DEFS = {
-    { key = "hudMovable",  label = "HUD bewegbar", type = "bool",    default = false },
-    { key = "playerMouse", label = "Spielermaus",  type = "bool",    default = false },
+    -- hudVisible kann auch via Tastenkombi (Default: RShift+T, Action
+    -- MYTODOS_TOGGLE_HUD) umgeschaltet werden. Hier als Fallback im
+    -- Settings-Dialog, falls die Tastenbelegung vergessen wurde.
+    { key = "hudVisible",  label = "HUD anzeigen",  type = "bool",    default = true },
     -- Schwellwerte: Trigger wenn Wert unter/ueber dieser Marke ist.
     -- "Futter unter 20%" heisst: Task erscheint sobald Trog unter 20% voll.
     -- "Mist ueber 80%" heisst: Task erscheint sobald Lager ueber 80% voll.
@@ -87,12 +105,6 @@ function MyTodos:onMapLoaded()
     self.timeSinceRescan = 0
     self.firstScanDone = false
 
-    self.dragging = false
-    self.dragOffsetX = 0
-    self.dragOffsetY = 0
-    self.hudX = MyTodos.HUD_DEFAULT_X
-    self.hudY = MyTodos.HUD_DEFAULT_Y
-
     self.settingsOpen = false
     self.settings = {}
     for _, def in ipairs(MyTodos.SETTING_DEFS) do
@@ -106,7 +118,10 @@ function MyTodos:onMapLoaded()
         g_currentMission:addUpdateable(self)
     end
 
-    self:registerActionEvents()
+    -- registerActionEvents NICHT hier aufrufen -- Giants resettet den
+    -- Input-Context bei jedem On-Foot/Vehicle-Wechsel. Stattdessen via
+    -- PlayerInputComponent.registerGlobalPlayerActionEvents Hook (siehe
+    -- unten), der bei jedem Context-Aufbau feuert.
     self:updateMouseCursor()
 end
 
@@ -207,15 +222,15 @@ end
 
 function MyTodos:registerActionEvents()
     if g_inputBinding == nil then return end
-    local success, eventId = g_inputBinding:registerActionEvent(
-        "MYTODOS_TOGGLE_SETTINGS",
-        self,
-        MyTodos.onActionToggleSettings,
-        false, true, false, true
-    )
-    if success and eventId ~= nil and g_inputBinding.setActionEventTextVisibility ~= nil then
-        g_inputBinding:setActionEventTextVisibility(eventId, false)
+    local function registerSilent(name, callback)
+        local success, eventId = g_inputBinding:registerActionEvent(
+            name, self, callback, false, true, false, true)
+        if success and eventId ~= nil and g_inputBinding.setActionEventTextVisibility ~= nil then
+            g_inputBinding:setActionEventTextVisibility(eventId, false)
+        end
     end
+    registerSilent("MYTODOS_TOGGLE_SETTINGS", MyTodos.onActionToggleSettings)
+    registerSilent("MYTODOS_TOGGLE_HUD",      MyTodos.onActionToggleHud)
 end
 
 function MyTodos:onActionToggleSettings()
@@ -227,9 +242,12 @@ function MyTodos:onActionToggleSettings()
     end
 end
 
+function MyTodos:onActionToggleHud()
+    self:setSetting("hudVisible", not (self.settings.hudVisible == true))
+end
+
 function MyTodos:onSettingsOpened()
     self.settingsOpen = true
-    self.dragging = false
 end
 
 function MyTodos:onSettingsClosed()
@@ -266,44 +284,46 @@ function MyTodos:cyclePercentSetting(key)
 end
 
 function MyTodos:updateMouseCursor()
-    local needCursor = self.settingsOpen
-        or self.settings.hudMovable
-        or self.settings.playerMouse
     if g_inputBinding ~= nil and g_inputBinding.setShowMouseCursor ~= nil then
-        g_inputBinding:setShowMouseCursor(needCursor)
+        g_inputBinding:setShowMouseCursor(self.settingsOpen)
     end
 end
 
--- Mouse handling ----------------------------------------------------
-
-function MyTodos:mouseEvent(posX, posY, isDown, isUp, button)
-    -- BaseMission.mouseEvent fires only when no GUI is active, so this
-    -- nur fuer HUD-Drag (wenn "HUD bewegbar" an).
-    if not self.settings.hudMovable then return end
-
-    if button == Input.MOUSE_BUTTON_LEFT then
-        if isDown and not self.dragging then
-            if self:isMouseOverPanel(posX, posY) then
-                self.dragging = true
-                self.dragOffsetX = posX - self.hudX
-                self.dragOffsetY = posY - self.hudY
+-- InputHelp-Metrics -------------------------------------------------
+--
+-- Liefert linke obere Ecke fuer das HUD plus den Body-Textsize-Wert.
+-- Beides kommt aus Giants' InputHelpDisplay (das F1-Hilfepanel oben
+-- links) -- so passt MyTodos pixel-genau neben das Game-Panel und nutzt
+-- exakt dieselbe Schriftgroesse wie die F1-Hilfezeilen.
+--
+-- Bewusst KEIN Visibility-Check: lineBg.width, Position und textSize
+-- werden auch dann gepflegt wenn das Panel via F1 ausgeblendet wurde --
+-- so springt/aendert sich MyTodos nicht wenn der Spieler die Hilfe
+-- versteckt.
+function MyTodos:getHudMetrics()
+    local margin = MyTodos.HUD_ANCHOR_MARGIN_X
+    local anchorX = (g_hudAnchorLeft or 0) + margin
+    local anchorY = g_hudAnchorTop or 1.0
+    local textSize = MyTodos.HUD_FALLBACK_TEXT_SIZE
+    local hud = g_currentMission and g_currentMission.hud
+    local inputHelp = hud and hud.inputHelp
+    if inputHelp ~= nil then
+        if type(inputHelp.getPosition) == "function" then
+            local ok, posX, posY = pcall(inputHelp.getPosition, inputHelp)
+            if ok and posX ~= nil and posY ~= nil then
+                local lineBg = inputHelp.lineBg
+                local width = (lineBg and lineBg.width) or 0
+                if width > 0 then
+                    anchorX = posX + width + margin
+                    anchorY = posY
+                end
             end
-        elseif isUp and self.dragging then
-            self.dragging = false
-            self:saveSettings()
+        end
+        if type(inputHelp.textSize) == "number" and inputHelp.textSize > 0 then
+            textSize = inputHelp.textSize
         end
     end
-    if self.dragging then
-        self.hudX = posX - self.dragOffsetX
-        self.hudY = posY - self.dragOffsetY
-    end
-end
-
-function MyTodos:isMouseOverPanel(posX, posY)
-    local b = self.panelBounds
-    if b == nil then return false end
-    return posX >= b.left and posX <= b.left + b.width
-        and posY >= b.bottom and posY <= b.bottom + b.height
+    return anchorX, anchorY, textSize
 end
 
 -- Drawing primitives ------------------------------------------------
@@ -332,13 +352,15 @@ function MyTodos:draw()
     if not self.isClient then return end
     if g_gui ~= nil and g_gui.currentGui ~= nil then return end
     if self.fieldTasks == nil then return end
+    if self.settings.hudVisible == false then return end
 
     self:drawHud()
 end
 
 function MyTodos:drawHud()
-    local size = MyTodos.HUD_TEXT_SIZE
-    local titleSize = MyTodos.HUD_TITLE_SIZE
+    -- Anker + Schriftgroesse beide aus Giants' InputHelp-Geometrie.
+    local anchorX, anchorY, size = self:getHudMetrics()
+    local titleSize = size * MyTodos.HUD_TITLE_SCALE
     local lineH = size * MyTodos.HUD_LINE_SPACING
     local padX = MyTodos.HUD_PAD_X
     local padY = MyTodos.HUD_PAD_Y
@@ -362,6 +384,21 @@ function MyTodos:drawHud()
         maxW = math.max(maxW, getTextWidth(size, text))
     end
 
+    -- Schreibt bis maxLines Tasks aus `tasks` (formatiert via fmt) ins
+    -- rows-Array. Wenn ueberlaeuft, eine "(+N weitere)"-Zeile am Ende.
+    local function emitSection(tasks, maxLines, fmt)
+        local shown = 0
+        for _, t in ipairs(tasks) do
+            if shown >= maxLines then
+                addRow(string.format("(+%d weitere)", #tasks - shown),
+                    MyTodos.HUD_DIM_COLOR, false)
+                return
+            end
+            addRow(fmt(t), MyTodos.HUD_TEXT_COLOR, false)
+            shown = shown + 1
+        end
+    end
+
     if not hasField and not hasHusb then
         local s
         if fieldOwned == 0 and husbOwned == 0 then
@@ -371,43 +408,22 @@ function MyTodos:drawHud()
         end
         addRow(s, MyTodos.HUD_DIM_COLOR, false)
     else
-        local lineBudget = MyTodos.HUD_MAX_LINES
-
         if hasField then
             if showSubHeaders then
                 addRow("── Felder ──", MyTodos.HUD_DIM_COLOR, true)
-                lineBudget = lineBudget - 1
             end
-            local shown = 0
-            for _, t in ipairs(fTasks) do
-                if shown >= lineBudget then
-                    addRow(string.format("(+%d weitere)", #fTasks - shown),
-                        MyTodos.HUD_DIM_COLOR, false)
-                    break
-                end
-                addRow(string.format("F%s  %s", tostring(t.fieldId), t.task),
-                    MyTodos.HUD_TEXT_COLOR, false)
-                shown = shown + 1
-                lineBudget = lineBudget - 1
-            end
+            emitSection(fTasks, MyTodos.HUD_MAX_FIELD_LINES, function(t)
+                return string.format("F%s  %s", tostring(t.fieldId), t.task)
+            end)
         end
 
         if hasHusb then
             if showSubHeaders then
                 addRow("── Tiere ──", MyTodos.HUD_DIM_COLOR, true)
-                lineBudget = lineBudget - 1
             end
-            local shown = 0
-            for _, t in ipairs(hTasks) do
-                if lineBudget <= 0 then
-                    addRow(string.format("(+%d weitere)", #hTasks - shown),
-                        MyTodos.HUD_DIM_COLOR, false)
-                    break
-                end
-                addRow(t.task, MyTodos.HUD_TEXT_COLOR, false)
-                shown = shown + 1
-                lineBudget = lineBudget - 1
-            end
+            emitSection(hTasks, MyTodos.HUD_MAX_HUSB_LINES, function(t)
+                return t.task
+            end)
         end
     end
 
@@ -416,30 +432,22 @@ function MyTodos:drawHud()
     local bodyH = padY + #rows * lineH + padY
     local totalH = headerH + bodyH
 
-    local panelLeft = self.hudX - panelW / 2
-    local panelTop = self.hudY
+    local panelLeft = anchorX
+    local panelTop = anchorY
     local panelBottom = panelTop - totalH
-
-    self.panelBounds = {
-        left = panelLeft,
-        bottom = panelBottom,
-        width = panelW,
-        height = totalH,
-    }
 
     self:drawPanel(panelLeft, panelTop - headerH, panelW, headerH, MyTodos.HUD_HEADER_COLOR)
     self:drawPanel(panelLeft, panelBottom, panelW, bodyH, MyTodos.HUD_BG_COLOR)
-    if self.settings.hudMovable then
-        self:drawPanel(panelLeft, panelBottom, panelW, totalH, MyTodos.HUD_EDIT_BG_COLOR)
-    end
 
-    setTextAlignment(RenderText.ALIGN_CENTER)
+    setTextAlignment(RenderText.ALIGN_LEFT)
     setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_TOP)
+
+    local textLeft = panelLeft + padX
 
     setTextBold(true)
     setTextColor(MyTodos.HUD_HEADER_TEXT[1], MyTodos.HUD_HEADER_TEXT[2],
                  MyTodos.HUD_HEADER_TEXT[3], MyTodos.HUD_HEADER_TEXT[4])
-    renderText(self.hudX, panelTop - padY, titleSize, titleText)
+    renderText(textLeft, panelTop - padY, titleSize, titleText)
     setTextBold(false)
 
     local y = panelTop - headerH - padY
@@ -447,7 +455,7 @@ function MyTodos:drawHud()
         local c = row.color
         setTextColor(c[1], c[2], c[3], c[4])
         if row.isHeader then setTextBold(true) end
-        renderText(self.hudX, y, size, row.text)
+        renderText(textLeft, y, size, row.text)
         if row.isHeader then setTextBold(false) end
         y = y - lineH
     end
@@ -617,10 +625,6 @@ function MyTodos:loadSettings()
     end
     local xmlFile = loadXMLFile("MyTodosSettings", path)
     if xmlFile == nil or xmlFile == 0 then return end
-    local x = getXMLFloat(xmlFile, "myTodos.hud#x")
-    local y = getXMLFloat(xmlFile, "myTodos.hud#y")
-    if x ~= nil then self.hudX = x end
-    if y ~= nil then self.hudY = y end
     for _, def in ipairs(MyTodos.SETTING_DEFS) do
         local p = "myTodos.settings#" .. def.key
         local typ = def.type or "bool"
@@ -633,9 +637,8 @@ function MyTodos:loadSettings()
         end
     end
     delete(xmlFile)
-    Logging.info("[MyTodos] loaded settings: hud x=%.3f y=%.3f movable=%s mouse=%s",
-        self.hudX, self.hudY,
-        tostring(self.settings.hudMovable), tostring(self.settings.playerMouse))
+    Logging.info("[MyTodos] loaded settings: hudVisible=%s",
+        tostring(self.settings.hudVisible))
 end
 
 function MyTodos:saveSettings()
@@ -646,8 +649,6 @@ function MyTodos:saveSettings()
         Logging.warning("[MyTodos] could not create settings file at %s", path)
         return
     end
-    setXMLFloat(xmlFile, "myTodos.hud#x", self.hudX)
-    setXMLFloat(xmlFile, "myTodos.hud#y", self.hudY)
     for _, def in ipairs(MyTodos.SETTING_DEFS) do
         local p = "myTodos.settings#" .. def.key
         local typ = def.type or "bool"
@@ -697,6 +698,14 @@ BaseMission.draw = Utils.appendedFunction(BaseMission.draw, function(mission)
     MyTodos:draw()
 end)
 
-BaseMission.mouseEvent = Utils.appendedFunction(BaseMission.mouseEvent, function(mission, posX, posY, isDown, isUp, button)
-    MyTodos:mouseEvent(posX, posY, isDown, isUp, button)
-end)
+-- Action-Events muessen JEDES MAL neu registriert werden wenn Giants den
+-- Input-Context aufbaut (on-foot <-> vehicle, GUI auf/zu, ...). Sonst sind
+-- die Bindings zwar im Preferences-Menue sichtbar, feuern aber nicht.
+-- Pattern wie in FS25_FarmlandOverview.
+if PlayerInputComponent ~= nil then
+    PlayerInputComponent.registerGlobalPlayerActionEvents = Utils.appendedFunction(
+        PlayerInputComponent.registerGlobalPlayerActionEvents,
+        function(playerInput, controlling)
+            MyTodos:registerActionEvents()
+        end)
+end
