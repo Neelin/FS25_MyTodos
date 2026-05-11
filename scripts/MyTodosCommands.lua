@@ -718,8 +718,8 @@ addConsoleCommand("mtProbePf",
     "consoleProbePfCmd", MyTodos)
 function MyTodos:consoleProbePfCmd(arg)
     -- Stage 1: PF-Instanz an verschiedenen moeglichen Stellen suchen.
-    -- Manche FS25-Setups parken die nicht in _G.g_precisionFarming sondern
-    -- in g_currentMission, g_modManager.mods[...] o.ae.
+    -- In FS25 gibt es kein verlaessliches Global -- die PF-Maps leben auf
+    -- Sprayer-Specs, der Backref zur zentralen Instanz ist pHMap.pfModule.
     local function findPfInstance()
         if g_precisionFarming ~= nil then
             return g_precisionFarming, "_G.g_precisionFarming"
@@ -728,20 +728,17 @@ function MyTodos:consoleProbePfCmd(arg)
             if g_currentMission.precisionFarming ~= nil then
                 return g_currentMission.precisionFarming, "g_currentMission.precisionFarming"
             end
-            if g_currentMission.g_precisionFarming ~= nil then
-                return g_currentMission.g_precisionFarming, "g_currentMission.g_precisionFarming"
-            end
         end
-        if g_modManager ~= nil and type(g_modManager.getMod) == "function" then
-            for _, name in ipairs({"FS25_precisionFarming", "FS25_PrecisionFarming"}) do
-                local ok, m = pcall(g_modManager.getMod, g_modManager, name)
-                if ok and m ~= nil then
-                    -- m ist meist ein ModDescriptor, suche darin nach PF-Instanz
-                    if type(m) == "table" then
-                        for k, v in pairs(m) do
-                            if type(v) == "table" and v.pHMap ~= nil then
-                                return v, "g_modManager.mods." .. name .. "." .. tostring(k)
-                            end
+        -- Spec-Scan: irgendein PF-Sprayer auf der Map -> spec.pHMap.pfModule
+        local vsys = g_currentMission and g_currentMission.vehicleSystem
+        if vsys ~= nil and type(vsys.vehicles) == "table" then
+            for _, veh in ipairs(vsys.vehicles) do
+                if type(veh) == "table" then
+                    for k, v in pairs(veh) do
+                        if tostring(k):find("^spec_") and type(v) == "table"
+                                and v.pHMap ~= nil and v.pHMap.pfModule ~= nil then
+                            return v.pHMap.pfModule,
+                                string.format("spec[%s].pHMap.pfModule", tostring(k))
                         end
                     end
                 end
@@ -918,6 +915,68 @@ function MyTodos:consoleProbePfCmd(arg)
         else
             Logging.info("[MyTodos] g_precisionFarming.%s: nil", mapName)
         end
+    end
+
+    -- 2b. Tiefer-Dump bestimmter Lookup-Tabellen auf pHMap/nitrogenMap/soilMap
+    -- damit wir die Target-Berechnung verstehen koennen.
+    local function deepDump(label, t, maxDepth, depth)
+        maxDepth = maxDepth or 3
+        depth = depth or 0
+        if t == nil then
+            Logging.info("[MyTodos] %s: nil", label)
+            return
+        end
+        if type(t) ~= "table" then
+            Logging.info("[MyTodos] %s: %s = %s", label, type(t), tostring(t))
+            return
+        end
+        local indent = string.rep("  ", depth)
+        local count = 0
+        for k, v in pairs(t) do
+            count = count + 1
+            local tv = type(v)
+            if tv == "number" or tv == "boolean" or tv == "string" then
+                Logging.info("[MyTodos] %s%s[%s] = %s",
+                    indent, label, tostring(k), tostring(v))
+            elseif tv == "table" then
+                if depth + 1 < maxDepth then
+                    Logging.info("[MyTodos] %s%s[%s] = <table>",
+                        indent, label, tostring(k))
+                    deepDump(label .. "[" .. tostring(k) .. "]", v, maxDepth, depth + 1)
+                else
+                    -- nur Key-Liste der inneren Tabelle
+                    local keys = {}
+                    for kk, _ in pairs(v) do
+                        table.insert(keys, tostring(kk))
+                        if #keys >= 20 then table.insert(keys, "..."); break end
+                    end
+                    table.sort(keys)
+                    Logging.info("[MyTodos] %s%s[%s] = <table>{%s}",
+                        indent, label, tostring(k), table.concat(keys, ", "))
+                end
+            else
+                Logging.info("[MyTodos] %s%s[%s] = <%s>", indent, label, tostring(k), tv)
+            end
+            if count >= 50 then
+                Logging.info("[MyTodos] %s%s ... (truncated at 50 entries)", indent, label)
+                break
+            end
+        end
+    end
+
+    if pf.pHMap ~= nil then
+        Logging.info("[MyTodos] === pHMap Lookup-Tabellen (fuer Target-Berechnung) ===")
+        deepDump("pHMap.pHValues", pf.pHMap.pHValues, 3)
+        deepDump("pHMap.pHValuesToDisplay", pf.pHMap.pHValuesToDisplay, 3)
+        deepDump("pHMap.yieldCurve", pf.pHMap.yieldCurve, 3)
+        deepDump("pHMap.valueTransformations", pf.pHMap.valueTransformations, 2)
+        deepDump("pHMap.limeUsage", pf.pHMap.limeUsage, 2)
+    end
+    if pf.soilMap ~= nil then
+        Logging.info("[MyTodos] === soilMap Bodenart-Infos ===")
+        deepDump("soilMap.soilTypes", pf.soilMap.soilTypes, 2)
+        deepDump("soilMap.soilTypeIndexToType", pf.soilMap.soilTypeIndexToType, 2)
+        deepDump("soilMap.types", pf.soilMap.types, 2)
     end
 
     -- 3. Wenn Feldnummer gegeben: Spot-Sample am Feld-Mittelpunkt
