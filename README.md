@@ -144,5 +144,4 @@ in der FS-Konsole (mit `~` öffnen, muss in `game.xml` ggf. aktiviert sein):
 Privater Mod, Autor: Tobias.
 
 Verwendet ausschließlich FS25-Vanilla-APIs (keine externen
-Mod-Abhängigkeiten). Cross-validiert gegen
-[`FS25_FarmlandOverview`](https://github.com/) für Feldnummern-Auflösung.
+Mod-Abhängigkeiten).
