@@ -60,10 +60,37 @@ MyTodos.PH_HEAVY_GAP_STATES = 4
 -- Anzahl Bodenarten (Stand FS25 2026: 4). soilMap.soilTypes hat genau
 -- diese vielen Eintraege, Indizes 1..N.
 MyTodos.SOIL_NUM_TYPES = 4
--- Mindest-Pixel + -Anteil damit eine Bodenart als "dominant" zaehlt.
--- Gleiche Konvention wie Stein-/Weed-Sampler.
+-- Mindest-Pixel + -Anteil damit eine Bodenart fuer Per-Soil-Tasks zaehlt.
+-- 10% Mindestanteil filtert Rand-Patches raus (typischerweise 5-7% kleine
+-- Eckbereiche, die der Spieler beim Spritzen sowieso nicht gezielt
+-- erreicht). Empirisch noetig: Feld 6 mit Schluffiger Ton 5% (228 px)
+-- triggerte Task wegen 15 kg/ha unter Target, obwohl Patch praktisch
+-- unanfahrbar ist und alle dominanteren Boeden im Soll waren.
 MyTodos.SOIL_MIN_PIXELS = 50
-MyTodos.SOIL_MIN_FRACTION = 0.05
+MyTodos.SOIL_MIN_FRACTION = 0.10
+
+-- Precision-Farming "N"-Schwellen. Analog zu pH: Target haengt von
+-- (Frucht, Bodenart) ab, NICHT vom Wachstumsstadium. Lookup ueber
+-- nitrogenMap.fruitTypeIndexToFruitRequirement[fruitIdx].bySoilType[soilIdx].targetLevel.
+--
+-- Trigger fuer "N"-Task: primaer `entry.reduction` aus bySoilType (PF's
+-- eigener "Auto-Apply re-fires hier"-Schwellwert; ueber dieser Schwelle
+-- zeigt PF "grün" und appliziert nicht nach). Wenn `reduction` im
+-- Eintrag fehlt, fallen wir auf `target - N_GAP_STATES` zurueck.
+--
+-- yieldCurve (nitrogenMap.yieldCurve, time = avgInternal - target):
+--   time=0    -> 100% yield
+--   time=-2   ->  95%
+--   time=-4   ->  90%   <- Fallback-Trigger ohne reduction
+--   time=-8   ->  82%
+--   time=-12  ->  70%
+-- 1 internal state = 5 kg/ha.
+--
+-- N_HEAVY_GAP_STATES: zusaetzlicher Abstand UNTER dem Trigger fuer
+-- "N-Mangel"-Suffix. Typisch reduction = target-5, also Suffix bei
+-- avg <= target-13 (= ca. 70% Yield).
+MyTodos.N_GAP_STATES = 4
+MyTodos.N_HEAVY_GAP_STATES = 8
 
 -- Discovery --------------------------------------------------------
 
@@ -516,36 +543,53 @@ function MyTodos:_phInternalToReal(internalValue)
     return 4.50 + internalValue * step
 end
 
--- Polygon-Average ueber das Feld. Liefert ein Tupel {realPh, internal}
--- oder nil. Internal-Repraesentation brauchen wir um mit den
--- valueTransformations-Schwellen vergleichen zu koennen (die sind
--- ebenfalls in internal-state-Einheiten).
-function MyTodos:samplePhForField(field)
+-- Polygon-Average der pH-Map AUFGESPALTET nach Bodentyp. Cross-map-Filter:
+-- pH-Modifier liest die pH-Werte, Soil-Filter (auf soilMap) reduziert die
+-- Pixelmenge auf die mit soil==v. Engine sum/area beziehen sich dann nur
+-- auf Pixel mit diesem Bodentyp. Liefert table[soilIdx] = {avgInternal, pixelArea}
+-- oder nil. Bodentypen ohne Pixel im Feld fehlen einfach in der Tabelle.
+--
+-- Hintergrund: das Feld kann mehrere Bodenarten enthalten. PF setzt
+-- pro-Pixel-Targets ein, also muss jeder Bodentyp gegen sein eigenes
+-- Target verglichen werden. Frueheres Pauschal-Average + dominant-soil
+-- war fuer gemischte Felder grob daneben.
+function MyTodos:samplePhPerSoil(field)
     if not self:initPhSampler() then return nil end
+    if not self:initSoilSampler() then return nil end
     if type(field.polygonPoints) ~= "table" or #field.polygonPoints == 0 then
         return nil
     end
     self:applyFieldPolygon(self.phMod, field)
-    -- executeGet() ohne Filter: sum, pixelArea, totalArea
-    local sum, pixelArea, _ = self.phMod:executeGet()
-    if pixelArea == nil or pixelArea < 1 then return nil end
-    local avgInternal = sum / pixelArea
-    -- Sehr niedrige Averages = "Soil-Map nicht gekauft" (uninitialisierte
-    -- Tiles haben internal=0). Schwellwert empirisch: bei gekauften Maps
-    -- liegt der Average typisch bei 5-25 (entspricht pH 5-7.5).
-    if avgInternal < 1 then return nil end
-    local realPh = self:_phInternalToReal(avgInternal)
-    if realPh == nil then return nil end
-    return { real = realPh, internal = avgInternal }
+    local out = {}
+    for soilIdx = 1, MyTodos.SOIL_NUM_TYPES do
+        local soilFilter = self.soilFilters and self.soilFilters[soilIdx]
+        if soilFilter ~= nil then
+            local sum, pixelArea, _ = self.phMod:executeGet(soilFilter)
+            if pixelArea ~= nil and pixelArea >= 1 then
+                out[soilIdx] = {
+                    avgInternal = sum / pixelArea,
+                    pixelArea = pixelArea,
+                }
+            end
+        end
+    end
+    return out
 end
 
 -- Soil-Sampler (Precision Farming) ---------------------------------
 --
--- Bestimmt die DOMINANTE Bodenart eines Feldes via Polygon-Sampling auf
--- soilMap.bitVectorMap. soilMap hat 3 Channels insgesamt
--- (typeFirstChannel=0, typeNumChannels=2 fuer den Typ-Anteil = 4 Werte,
--- der dritte Channel ist Cover/Sampling-State). Werte 1..4 mappen direkt
--- auf soilMap.soilTypes[1..4]. Value 0 = uninitialisiert.
+-- soilMap hat 3 Channels insgesamt (typeFirstChannel=0, typeNumChannels=2
+-- fuer den Bodentyp -> Werte 0..3; coverChannel=2 fuer Sampling-State).
+--
+-- WICHTIG: Bitmap-Wert ist 0..3, mappt auf soilTypes[1..4] mit OFFSET +1.
+-- D.h. bitmap=0 -> soilTypes[1] (Lehmiger Sand), bitmap=3 -> soilTypes[4]
+-- (Schluffiger Ton). KEIN "uninit"-Wert in dieser Codierung; alle Pixel
+-- haben einen Bodentyp. Die "Bodenkarte gekauft"-Info sitzt im
+-- coverChannel separat.
+-- Empirisch verifiziert via mtDebugPf auf Feld 2: Histogramm zeigte
+-- bitmap-Werte 0..3 mit Anteilen 40/26/3/31% -- PF-HUD am Sprayer
+-- berichtete Targets fuer Lehmiger Sand + Schluffiger Ton (die zwei
+-- haeufigsten via +1-Mapping), nicht fuer Lehm.
 
 function MyTodos:initSoilSampler()
     if self.soilSamplerReady ~= nil then return self.soilMod ~= nil end
@@ -581,39 +625,18 @@ function MyTodos:initSoilSampler()
         return false
     end
     self.soilMod = mod
+    -- Tabellen-Index = soilType-Index (1..4, matched soilTypes[i].name und
+    -- bySoilType[i]). Filter compared gegen bitmap-Wert (soilType-Index - 1)
+    -- weil bitmap nur 0..3 hat.
     self.soilFilters = {}
-    for v = 1, MyTodos.SOIL_NUM_TYPES do
+    for soilIdx = 1, MyTodos.SOIL_NUM_TYPES do
         local f = DensityMapFilter.new(mod)
-        f:setValueCompareParams(DensityValueCompareType.EQUAL, v)
-        self.soilFilters[v] = f
+        f:setValueCompareParams(DensityValueCompareType.EQUAL, soilIdx - 1)
+        self.soilFilters[soilIdx] = f
     end
-    Logging.info("[MyTodos] soil sampler ready (bitVectorMap=%s firstCh=%d numCh=%d)",
-        tostring(soilMap.bitVectorMap), firstCh, numCh)
+    Logging.info("[MyTodos] soil sampler ready (bitVectorMap=%s firstCh=%d numCh=%d, soilType[i] -> bitmap %d..%d)",
+        tostring(soilMap.bitVectorMap), firstCh, numCh, 0, MyTodos.SOIL_NUM_TYPES - 1)
     return true
-end
-
--- Liefert den dominanten Bodentyp-Index (1..N) oder nil.
-function MyTodos:sampleDominantSoilType(field)
-    if not self:initSoilSampler() then return nil end
-    if type(field.polygonPoints) ~= "table" or #field.polygonPoints == 0 then
-        return nil
-    end
-    self:applyFieldPolygon(self.soilMod, field)
-    local _, _, totalArea = self.soilMod:executeGet()
-    if totalArea == nil or totalArea < 1 then return nil end
-    local threshold = math.max(
-        MyTodos.SOIL_MIN_PIXELS,
-        math.floor(totalArea * MyTodos.SOIL_MIN_FRACTION)
-    )
-    local bestIdx, bestArea = nil, 0
-    for v = 1, MyTodos.SOIL_NUM_TYPES do
-        local _, area, _ = self.soilMod:executeGet(self.soilFilters[v])
-        if area ~= nil and area > bestArea and area >= threshold then
-            bestArea = area
-            bestIdx = v
-        end
-    end
-    return bestIdx
 end
 
 -- Sucht in pHMap.valueTransformations den Eintrag fuer einen Bodentyp-
@@ -641,31 +664,234 @@ function MyTodos:soilTypeName(soilIdx)
     return entry.name
 end
 
--- Liefert "Kalk: pH X.X / Y.Y (Bodenname[, stark sauer])"-Label oder nil
--- wenn nichts zu tun (PF inaktiv, Soil-Map nicht gekauft, pH okay).
+-- Liefert "Kalk: pH X.X / Y.Y (Bodenname[, stark sauer])"-Label oder nil.
 --
--- Trigger-Logik exakt wie PF's eigener Auto-Apply:
---   triggerInternal = optimalValue - regularOffset
---   wenn avg < trigger -> Kalk noetig
--- "stark sauer" wenn avg <= trigger - PH_HEAVY_GAP_STATES (~ 80% Yield).
+-- Per-Soil-Logik: iteriert ueber alle Bodentypen im Feld, vergleicht jeden
+-- gegen sein eigenes Target (PF setzt pro-Pixel-Targets ein, also muss
+-- pro Boden gerechnet werden -- ein gemischtes Feld kann Lehmiger-Sand-
+-- Pixel bei pH 6.0 (= deren Idealwert) haben waehrend Lehm-Pixel bei
+-- pH 6.7 (= deren Idealwert) sind. Avg waere 6.4 was als Defizit fuer
+-- den dominanten Boden angezeigt wird, obwohl PF "alles gruen" sagt).
+--
+-- Reportet wird der Bodentyp mit der GROESSTEN Luecke (optimalValue - avg).
+-- Bodentypen unter SOIL_MIN_FRACTION/SOIL_MIN_PIXELS Anteil werden
+-- ignoriert (Rand-Pixel anderer Bodenarten).
 function MyTodos:limeTaskPf(field)
     if not self:isPfActive() then return nil end
-    local ph = self:samplePhForField(field)
-    if ph == nil then return nil end
-    local soilIdx = self:sampleDominantSoilType(field)
-    if soilIdx == nil then return nil end
-    local transform = self:lookupPhTransformForSoil(soilIdx)
-    if transform == nil then return nil end
-    local triggerInternal = transform.optimalValue - transform.regularOffset
-    if ph.internal >= triggerInternal then return nil end
-    local targetReal = self:_phInternalToReal(transform.optimalValue) or 0
-    local soilName = self:soilTypeName(soilIdx) or "?"
+    local perSoil = self:samplePhPerSoil(field)
+    if perSoil == nil then return nil end
+    local totalPx = 0
+    for _, s in pairs(perSoil) do totalPx = totalPx + s.pixelArea end
+    if totalPx < 1 then return nil end
+    local minPx = math.max(MyTodos.SOIL_MIN_PIXELS,
+        math.floor(totalPx * MyTodos.SOIL_MIN_FRACTION))
+
+    local worst = nil  -- { soilIdx, avg, transform, gap }
+    for soilIdx, sample in pairs(perSoil) do
+        if sample.pixelArea >= minPx then
+            local transform = self:lookupPhTransformForSoil(soilIdx)
+            if transform ~= nil then
+                local trigger = transform.optimalValue - transform.regularOffset
+                if sample.avgInternal < trigger then
+                    local gap = transform.optimalValue - sample.avgInternal
+                    if worst == nil or gap > worst.gap then
+                        worst = {
+                            soilIdx = soilIdx,
+                            avg = sample.avgInternal,
+                            transform = transform,
+                            gap = gap,
+                        }
+                    end
+                end
+            end
+        end
+    end
+    if worst == nil then return nil end
+    local realPh = self:_phInternalToReal(worst.avg) or 0
+    local targetReal = self:_phInternalToReal(worst.transform.optimalValue) or 0
+    local soilName = self:soilTypeName(worst.soilIdx) or "?"
     local extra = ""
-    if ph.internal <= triggerInternal - MyTodos.PH_HEAVY_GAP_STATES then
+    -- "stark sauer" wenn Luecke groesser als regularOffset + PH_HEAVY_GAP_STATES.
+    if worst.gap >= worst.transform.regularOffset + MyTodos.PH_HEAVY_GAP_STATES then
         extra = ", stark sauer"
     end
     return string.format("Kalk: pH %.1f / %.1f (%s%s)",
-        ph.real, targetReal, soilName, extra)
+        realPh, targetReal, soilName, extra)
+end
+
+-- N-Sampler (Precision Farming) ------------------------------------
+--
+-- Polygon-Average ueber nitrogenMap.bitVectorMap, exakt wie pH-Sampler.
+-- Internal-Range 0..45 (numChannels=6), amountPerState=5 -> 0..225 kg/ha.
+-- Konvertierung intern -> real via nitrogenMap:getNitrogenValueFromInternalValue
+-- (oder Fallback: (internal-1)*5 mit max(0, ...) weil internal=0 und 1 beide
+-- als 0 kg/ha behandelt werden).
+
+function MyTodos:findPfNitrogenMap()
+    if self._pfNMapCached ~= nil then return self._pfNMapCached end
+    local pHMap = self:findPfPHMap()
+    if pHMap == nil then return nil end
+    local pf = pHMap.pfModule
+    local nMap = pf and pf.nitrogenMap
+    if nMap == nil then return nil end
+    self._pfNMapCached = nMap
+    return nMap
+end
+
+function MyTodos:initNSampler()
+    if self.nSamplerReady ~= nil then return self.nMod ~= nil end
+    local nMap = self:findPfNitrogenMap()
+    if nMap == nil then return false end
+    self.nSamplerReady = true
+    self.nMap = nMap
+
+    if nMap.bitVectorMap == nil then
+        Logging.info("[MyTodos] N sampler: nitrogenMap.bitVectorMap nil")
+        return false
+    end
+    if DensityMapModifier == nil or g_currentMission.terrainRootNode == nil then
+        return false
+    end
+    local ok, mod = pcall(DensityMapModifier.new, nMap.bitVectorMap,
+        nMap.firstChannel or 0, nMap.numChannels or 6,
+        g_currentMission.terrainRootNode)
+    if not ok or mod == nil then
+        Logging.warning("[MyTodos] N sampler: DensityMapModifier.new failed: %s", tostring(mod))
+        return false
+    end
+    self.nMod = mod
+    Logging.info("[MyTodos] N sampler ready (bitVectorMap=%s firstCh=%s numCh=%s maxValue=%s amountPerState=%s)",
+        tostring(nMap.bitVectorMap), tostring(nMap.firstChannel),
+        tostring(nMap.numChannels), tostring(nMap.maxValue),
+        tostring(nMap.amountPerState))
+    return true
+end
+
+function MyTodos:_nInternalToReal(internalValue)
+    local m = self.nMap
+    if m == nil then return nil end
+    if type(m.getNitrogenValueFromInternalValue) == "function" then
+        local ok, real = pcall(m.getNitrogenValueFromInternalValue, m, internalValue)
+        if ok and type(real) == "number" then return real end
+    end
+    local step = m.amountPerState or 5
+    return math.max(0, (internalValue - 1) * step)
+end
+
+-- Polygon-Average der N-Map AUFGESPALTET nach Bodentyp. Cross-map-Filter:
+-- N-Modifier liest die N-Werte, Soil-Filter reduziert auf Pixel mit soil==v.
+-- Liefert table[soilIdx] = {avgInternal, pixelArea} oder nil.
+-- Selbe Begruendung wie samplePhPerSoil: N-Target haengt vom Boden ab,
+-- gemischte Felder muessen per-Soil bewertet werden.
+function MyTodos:sampleNPerSoil(field)
+    if not self:initNSampler() then return nil end
+    if not self:initSoilSampler() then return nil end
+    if type(field.polygonPoints) ~= "table" or #field.polygonPoints == 0 then
+        return nil
+    end
+    self:applyFieldPolygon(self.nMod, field)
+    local out = {}
+    for soilIdx = 1, MyTodos.SOIL_NUM_TYPES do
+        local soilFilter = self.soilFilters and self.soilFilters[soilIdx]
+        if soilFilter ~= nil then
+            local sum, pixelArea, _ = self.nMod:executeGet(soilFilter)
+            if pixelArea ~= nil and pixelArea >= 1 then
+                out[soilIdx] = {
+                    avgInternal = sum / pixelArea,
+                    pixelArea = pixelArea,
+                }
+            end
+        end
+    end
+    return out
+end
+
+-- Lookup: (fruitTypeIndex, soilTypeIndex) -> { internal, real, reductionInternal }
+-- oder nil. Liest nitrogenMap.fruitTypeIndexToFruitRequirement direkt.
+--
+-- `targetLevel` = "Regular Rate"-Auto-Apply-Zielwert (was PF anstrebt).
+-- `reduction` = "Reduced Rate"-Zielwert, typisch 3-8 states unter target.
+--   Das ist die Schwelle unter der PF auto-apply re-feuert. Ueber dieser
+--   Schwelle sagt PF "grün" -> kein Re-Apply noetig. Diese Schwelle
+--   nutzen wir als Trigger fuer die Task (matched PF-UX).
+function MyTodos:lookupNTargetByFruitAndSoil(fruitIdx, soilIdx)
+    local nMap = self.nMap or self:findPfNitrogenMap()
+    if nMap == nil then return nil end
+    local map = nMap.fruitTypeIndexToFruitRequirement
+    if type(map) ~= "table" then return nil end
+    local req = map[fruitIdx]
+    if req == nil then return nil end
+    if (req.averageTargetLevel or 0) <= 0 then return nil end
+    local bySoil = req.bySoilType
+    if type(bySoil) ~= "table" then return nil end
+    local entry = bySoil[soilIdx]
+    if entry == nil then return nil end
+    local target = entry.targetLevel
+    if target == nil or target <= 0 then return nil end
+    local reduction = entry.reduction
+    return {
+        internal = target,
+        real = self:_nInternalToReal(target) or 0,
+        reductionInternal = (reduction ~= nil and reduction > 0) and reduction or nil,
+    }
+end
+
+-- Liefert "N: 35/85 kg/ha (Weizen, Lehm[, N-Mangel])"-Label oder nil.
+--
+-- Per-Soil-Logik wie limeTaskPf: iteriert ueber alle Bodentypen im Feld,
+-- vergleicht avg-N pro Boden gegen den jeweiligen targetLevel aus
+-- nitrogenMap.fruitTypeIndexToFruitRequirement[fruit].bySoilType[soil].
+-- Reportet wird der Boden mit der GROESSTEN Luecke.
+function MyTodos:fertilizerTaskPf(field, fs, fruit)
+    if not self:isPfActive() then return nil end
+    if fruit == nil or fruit.regrows then return nil end
+    local perSoil = self:sampleNPerSoil(field)
+    if perSoil == nil then return nil end
+    local totalPx = 0
+    for _, s in pairs(perSoil) do totalPx = totalPx + s.pixelArea end
+    if totalPx < 1 then return nil end
+    local minPx = math.max(MyTodos.SOIL_MIN_PIXELS,
+        math.floor(totalPx * MyTodos.SOIL_MIN_FRACTION))
+
+    local worst = nil  -- { soilIdx, avg, target, gap, trigger }
+    for soilIdx, sample in pairs(perSoil) do
+        if sample.pixelArea >= minPx then
+            local target = self:lookupNTargetByFruitAndSoil(fruit.index, soilIdx)
+            if target ~= nil then
+                -- Trigger = reductionInternal wenn vorhanden (PF's eigener
+                -- "noch nicht genug"-Schwellwert), sonst Fallback target-Gap.
+                local trigger = target.reductionInternal
+                    or (target.internal - MyTodos.N_GAP_STATES)
+                if sample.avgInternal < trigger then
+                    -- Ranking-Metrik: Abstand zum Trigger (nicht zum Target).
+                    -- So gewinnt der Boden mit der echtesten Unterversorgung,
+                    -- nicht der mit dem hoechsten absoluten Target.
+                    local gap = trigger - sample.avgInternal
+                    if worst == nil or gap > worst.gap then
+                        worst = {
+                            soilIdx = soilIdx,
+                            avg = sample.avgInternal,
+                            target = target,
+                            trigger = trigger,
+                            gap = gap,
+                        }
+                    end
+                end
+            end
+        end
+    end
+    if worst == nil then return nil end
+    local realKg = self:_nInternalToReal(worst.avg) or 0
+    local soilName = self:soilTypeName(worst.soilIdx) or "?"
+    -- "N-Mangel" wenn weitere N_HEAVY_GAP_STATES unter dem Trigger
+    -- (= deutlich unter reduction).
+    local extra = ""
+    if worst.gap >= MyTodos.N_HEAVY_GAP_STATES then
+        extra = ", N-Mangel"
+    end
+    return string.format("N: %d/%d kg/ha (%s, %s%s)",
+        math.floor(realKg + 0.5), math.floor(worst.target.real + 0.5),
+        self:fruitName(fruit), soilName, extra)
 end
 
 -- Field history (Duengen-Lockout) ----------------------------------
@@ -920,11 +1146,19 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
         local stillGrowing = not atCut and maxHarvest ~= nil and growth >= 1
             and (minHarvest == nil or growth < minHarvest)
 
-        -- Düngen: klassische Spritze, nur fuer nicht-regrowing Fruechte
-        if stillGrowing and not fruit.regrows
-                and spray < sprayMax
-                and not self:isFertLocked(fieldId, fs) then
-            table.insert(out, string.format("Düngen %d/%d", spray, sprayMax))
+        -- Duengen: PF (N-aware via nitrogenMap) wenn aktiv, sonst vanilla
+        -- Spray-Level mit Lockout-Heuristik. Misch-Modus bewusst nicht --
+        -- unter PF ist sprayLevel zwar weiterhin vorhanden, aber die
+        -- relevante Information sitzt in der N-Map.
+        if stillGrowing and not fruit.regrows then
+            if self:isPfActive() then
+                local pfTask = self:fertilizerTaskPf(field, fs, fruit)
+                if pfTask ~= nil then
+                    table.insert(out, pfTask)
+                end
+            elseif spray < sprayMax and not self:isFertLocked(fieldId, fs) then
+                table.insert(out, string.format("Düngen %d/%d", spray, sprayMax))
+            end
         end
         -- Walzen: rollerLevel ist INVERTIERT. 1 = "muss gewalzt werden", 0 = erledigt.
         -- ABER: bei non-regrowing Fruechten ist Walzen nur direkt nach Saat

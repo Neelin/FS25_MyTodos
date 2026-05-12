@@ -972,6 +972,23 @@ function MyTodos:consoleProbePfCmd(arg)
         deepDump("pHMap.valueTransformations", pf.pHMap.valueTransformations, 2)
         deepDump("pHMap.limeUsage", pf.pHMap.limeUsage, 2)
     end
+    if pf.nitrogenMap ~= nil then
+        Logging.info("[MyTodos] === nitrogenMap Lookup-Tabellen (fuer N-Target) ===")
+        deepDump("nitrogenMap.fruitRequirements", pf.nitrogenMap.fruitRequirements, 4)
+        deepDump("nitrogenMap.fruitTypeIndexToFruitRequirement",
+            pf.nitrogenMap.fruitTypeIndexToFruitRequirement, 2)
+        deepDump("nitrogenMap.nitrogenValues", pf.nitrogenMap.nitrogenValues, 2)
+        deepDump("nitrogenMap.yieldCurve", pf.nitrogenMap.yieldCurve, 3)
+        deepDump("nitrogenMap.applicationRates", pf.nitrogenMap.applicationRates, 3)
+        deepDump("nitrogenMap.initialValues", pf.nitrogenMap.initialValues, 2)
+        deepDump("nitrogenMap.initialSprayLevelBonus", pf.nitrogenMap.initialSprayLevelBonus, 2)
+        deepDump("nitrogenMap.nOffsetIndexToOffset", pf.nitrogenMap.nOffsetIndexToOffset, 2)
+        deepDump("nitrogenMap.fertilizerFillTypes", pf.nitrogenMap.fertilizerFillTypes, 2)
+        deepDump("nitrogenMap.fertilizerUsage", pf.nitrogenMap.fertilizerUsage, 2)
+        deepDump("nitrogenMap.cropSensorFruitTypes", pf.nitrogenMap.cropSensorFruitTypes, 2)
+        deepDump("nitrogenMap.valueFilter", pf.nitrogenMap.valueFilter, 2)
+        deepDump("nitrogenMap.valueFilterEnabled", pf.nitrogenMap.valueFilterEnabled, 2)
+    end
     if pf.soilMap ~= nil then
         Logging.info("[MyTodos] === soilMap Bodenart-Infos ===")
         deepDump("soilMap.soilTypes", pf.soilMap.soilTypes, 2)
@@ -1070,4 +1087,88 @@ function MyTodos:consoleProbePfCmd(arg)
     end
 
     return string.format("PF probed at field %s center - check log", tostring(arg))
+end
+
+-- Histogram-Diagnose pH/N pro Feld: gibt fuer jeden internal-state-Wert die
+-- Pixel-Anzahl im Feld-Polygon aus. So sehen wir genau ob/wieviel
+-- uninit-Pixel (value=0) den Average verfaelschen und ob der Filter wirkt.
+addConsoleCommand("mtDebugPf",
+    "Histogram of pH/N density-map values in field polygon. Usage: mtDebugPf <fieldNumber>",
+    "consoleDebugPfCmd", MyTodos)
+function MyTodos:consoleDebugPfCmd(arg)
+    if arg == nil or arg == "" then
+        return "Usage: mtDebugPf <fieldNumber>"
+    end
+    local field = self:resolveFieldByUserNumber(arg)
+    if field == nil then return "field " .. tostring(arg) .. " not found" end
+    if type(field.polygonPoints) ~= "table" or #field.polygonPoints == 0 then
+        return "no polygonPoints"
+    end
+    local pHMap = self:findPfPHMap()
+    if pHMap == nil then return "no PF pHMap available" end
+
+    local function histo(label, map, firstCh, numCh, maxVal)
+        if map == nil then
+            Logging.info("[MyTodos] %s: density-map nil", label)
+            return
+        end
+        local mod = DensityMapModifier.new(map, firstCh, numCh,
+            g_currentMission.terrainRootNode)
+        self:applyFieldPolygon(mod, field)
+        local sumAll, areaAll, totalArea = mod:executeGet()
+        Logging.info("[MyTodos] %s: no filter -> sum=%s pixelArea=%s totalArea=%s avgInternal=%.3f",
+            label, tostring(sumAll), tostring(areaAll), tostring(totalArea),
+            (areaAll and areaAll > 0) and (sumAll / areaAll) or -1)
+        if DensityMapFilter ~= nil then
+            local f = DensityMapFilter.new(mod)
+            f:setValueCompareParams(DensityValueCompareType.GREATER, 0)
+            local sumG, areaG, _ = mod:executeGet(f)
+            Logging.info("[MyTodos] %s: GREATER 0  -> sum=%s pixelArea=%s avgInternal=%.3f",
+                label, tostring(sumG), tostring(areaG),
+                (areaG and areaG > 0) and (sumG / areaG) or -1)
+            local fb = DensityMapFilter.new(mod)
+            fb:setValueCompareParams(DensityValueCompareType.BETWEEN, 1, maxVal)
+            local sumB, areaB, _ = mod:executeGet(fb)
+            Logging.info("[MyTodos] %s: BETWEEN 1..%d -> sum=%s pixelArea=%s avgInternal=%.3f",
+                label, maxVal, tostring(sumB), tostring(areaB),
+                (areaB and areaB > 0) and (sumB / areaB) or -1)
+        end
+        -- Pro-Wert-Histogramm (nur wenn maxVal handlich). Bei Soil-Map auch
+        -- die soilType-Namen ausgeben (Bitmap v=0..3 -> soilTypes[1..4]).
+        local soilMap = pHMap.pfModule and pHMap.pfModule.soilMap
+        local soilTypes = soilMap and soilMap.soilTypes
+        for v = 0, maxVal do
+            local fv = DensityMapFilter.new(mod)
+            fv:setValueCompareParams(DensityValueCompareType.EQUAL, v)
+            local _, areaV, _ = mod:executeGet(fv)
+            if areaV ~= nil and areaV > 0 then
+                local suffix = ""
+                if label == "Soil" and soilTypes ~= nil and soilTypes[v + 1] ~= nil then
+                    suffix = string.format(" (%s)", soilTypes[v + 1].name or "?")
+                end
+                Logging.info("[MyTodos]   %s[v=%d] = %d px%s", label, v, areaV, suffix)
+            end
+        end
+    end
+
+    Logging.info("[MyTodos] === mtDebugPf field %s ===", tostring(arg))
+    histo("pH", pHMap.bitVectorMap, pHMap.firstChannel or 0,
+        pHMap.numChannels or 5, pHMap.maxValue or 31)
+    local nMap = pHMap.pfModule and pHMap.pfModule.nitrogenMap
+    if nMap ~= nil then
+        histo("N", nMap.bitVectorMap, nMap.firstChannel or 0,
+            nMap.numChannels or 6, nMap.maxValue or 45)
+    end
+    local soilMap = pHMap.pfModule and pHMap.pfModule.soilMap
+    if soilMap ~= nil then
+        histo("Soil", soilMap.bitVectorMap, soilMap.typeFirstChannel or 0,
+            soilMap.typeNumChannels or 2, MyTodos.SOIL_NUM_TYPES)
+    end
+    -- Init-Mask wenn vorhanden (separate Map mit "Bodenkarte gekauft" = 1)
+    local initMap = pHMap.bitVectorMapPHInitMask
+    if initMap ~= nil then
+        Logging.info("[MyTodos] pHMap.bitVectorMapPHInitMask = %s (separate Map fuer 'gekauft'-Filter)",
+            tostring(initMap))
+    end
+    return "mtDebugPf done - check log"
 end

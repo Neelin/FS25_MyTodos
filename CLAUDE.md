@@ -276,7 +276,8 @@ Die zentrale PF-Instanz erreicht man indirekt via `pHMap.pfModule`. Auch `g_modM
 - `pHMap.limeUsage.usagePerState=730` — kg Kalk pro state change (Info, fuer Task nicht gebraucht).
 
 **soilMap-Attribute**:
-- `bitVectorMap=<id>`, `typeFirstChannel=0`, `typeNumChannels=2` — 4 Bodentypen (Werte 1..4, 0=uninitialisiert)
+- `bitVectorMap=<id>`, `typeFirstChannel=0`, `typeNumChannels=2` — Bitmap-Werte 0..3 (2 bits)
+- **WICHTIG: Bitmap-Wert -> soilTypes-Index hat +1 Offset!** Bitmap 0 = soilTypes[1] (Lehmiger Sand), Bitmap 1 = soilTypes[2] (Sandiger Lehm), Bitmap 2 = soilTypes[3] (Lehm), Bitmap 3 = soilTypes[4] (Schluffiger Ton). KEIN "uninit"-Wert in dieser Codierung -- die "Bodenkarte gekauft"-Info sitzt im separaten `coverChannel=2`. Daher in den `soilFilters` Filter-Wert = soilType-Index - 1. Empirisch verifiziert via Feld 2 mtDebugPf: PF-HUD zeigte 120+180 kg/ha Targets fuer Lehmiger Sand+Schluffiger Ton (die zwei haeufigsten via +1-Mapping), das matched die Histogramm-Verteilung der Bitmap-Werte 0+3.
 - `soilMap.soilTypes[1..4]` — `{ name, yieldPotential, color, colorBlind }` pro Bodenart:
   ```
   [1] Lehmiger Sand   (yieldPotential 0.80)
@@ -285,40 +286,111 @@ Die zentrale PF-Instanz erreicht man indirekt via `pHMap.pfModule`. Auch `g_modM
   [4] Schluffiger Ton (yieldPotential 0.90)
   ```
 
-**Polygon-Sampling pH** (`MyTodos:samplePhForField`):
-- `DensityMapModifier.new(pHMap.bitVectorMap, firstChannel, numChannels, terrainRootNode)`
-- `applyFieldPolygon` (Helper, gleicher Code wie Weed/Stone-Sampler)
-- `mod:executeGet()` ohne Filter -> `sum, pixelArea, totalArea`
-- `avgInternal = sum / pixelArea`. Bei `avgInternal < 1` -> "Soil-Map nicht gekauft" -> nil
-- Konvertierung zu real-pH via `pHMap:getPhValueFromInternalValue(avg)`
-- Liefert `{ real=pH, internal=avgInternal }` damit Vergleiche in beiden Einheiten moeglich sind.
+**Per-Soil Polygon-Sampling pH** (`MyTodos:samplePhPerSoil`):
+- DensityMapModifier auf `pHMap.bitVectorMap` (in `initPhSampler` einmal angelegt)
+- Soil-Filter aus `initSoilSampler` (EQUAL 1..4 auf `soilMap.bitVectorMap`) als **Cross-Map-Filter** an `phMod:executeGet(soilFilter)` durchgereicht. Engine berechnet sum+pixelArea genau ueber die Pixel wo die SOIL-Map den Filter-Wert hat -- ph-Werte werden nach Bodentyp aufgeteilt.
+- Liefert `table[soilIdx] = { avgInternal, pixelArea }`. Bodentypen ohne Pixel im Feld fehlen einfach.
+- WICHTIG: gleicher Filter-Code wie beim Soil-Sampler `DensityMapFilter.new(self.soilMod); setValueCompareParams(EQUAL, v)`. Der Filter speichert Map+Channels vom Modifier-Konstruktor und ist unabhaengig vom Modifier-Objekt das ihn spaeter benutzt.
 
-**Soil-Sampler** (`MyTodos:initSoilSampler`, `sampleDominantSoilType`):
+**Soil-Sampler** (`MyTodos:initSoilSampler`):
 - Schnappt `soilMap` via `pHMap.pfModule.soilMap` (oder `pHMap.soilMap` als Fallback)
 - DensityMapModifier auf `soilMap.bitVectorMap` mit `typeFirstChannel/typeNumChannels`
-- Polygon-Sample mit `EQUAL`-Filtern fuer Werte 1..N, ermittelt dominanten Boden
-- Schwelle `max(50px, 5% Feldflaeche)` damit Bodenart als "dominant" zaehlt
-- v1 dominant-soil-Approach (statt Pixel-weisem Target) -- ein gemischtes Feld bekommt den Target des haeufigsten Bodens
+- `soilFilters[1..4]` = `DensityMapFilter.new(soilMod)` + `EQUAL v` -- werden auch von pH-/N-Samplern als Cross-Map-Filter wiederverwendet.
 
 **Label-Logik** (`limeTaskPf`):
-- pH-Polygon-Average lesen
-- Dominante Bodenart bestimmen
-- Target = `valueTransformations[soilIdx].optimalValue` (-> via getPhValueFromInternalValue auf real-pH)
-- Trigger = `optimalValue - regularOffset` (in internal states; entspricht ~0.06-0.19 pH Toleranz je nach Boden) -- exakt wie PF's Auto-Apply trigger
-- Bei `avg.internal < trigger` -> Task `"Kalk: pH 5.8 / 6.5 (Sandiger Lehm)"`
-- Wenn `avg.internal <= trigger - PH_HEAVY_GAP_STATES` (4 states ~ 0.5 pH, entspricht ~80% Yield laut yieldCurve) -> Suffix `", stark sauer"` in der Klammer
+- Per-Soil pH-Avg lesen via `samplePhPerSoil`
+- Pro Bodentyp: Target via `valueTransformations[soil].optimalValue`, Trigger = `optimal - regularOffset` (genauso wie PF's Auto-Apply trigger)
+- Bodentypen unter `SOIL_MIN_PIXELS` / `SOIL_MIN_FRACTION` (50 px oder 5% des bezahlten Feld-Anteils) werden ignoriert -- Rand-Pixel anderer Soils
+- Bei einem oder mehreren defizitaeren Boden: reportet wird der mit der GROESSTEN Luecke (`optimal - avg`)
+- Bei `gap >= regularOffset + PH_HEAVY_GAP_STATES` -> Suffix `", stark sauer"`
+- Label-Format unveraendert: `"Kalk: pH 5.8 / 6.5 (Sandiger Lehm)"`
+
+**Warum per-Soil und nicht Pauschal-Average?** Empirisch auf Feld 2 (Probe-Dump 12. Mai 2026, gemischtes Feld 26%/3%/31%/40%uninit): pH-Histogramm zeigte 4 saubere Cluster bei v=13/17/19/21 -- exakt die Soil-Targets von Lehmiger Sand, Sandiger Lehm, Lehm und (vermutlich uninit-Pixel-Default bzw. Schluffiger Ton). PF hatte pro-Pixel kalibriert, alles in-target. Pauschal-Average=16.6 -> falscher "Kalk noetig"-Task fuer dominanten Boden Lehm. Mit per-Soil-Lookup ist jeder Boden bei seinem eigenen Optimum, kein Task.
 
 **In `deriveParallelVanilla`**: bei aktivem PF nur `limeTaskPf`, ohne PF nur Vanilla `limeLevel == 0 -> "Kalken"`. Kein Misch-Modus.
 
 **Schwellen-Konstanten** oben in `MyTodosFields.lua`:
 - `PH_HEAVY_GAP_STATES = 4` — Internal-State-Abstand fuer "stark sauer"-Qualifier
-- `SOIL_NUM_TYPES = 4`, `SOIL_MIN_PIXELS = 50`, `SOIL_MIN_FRACTION = 0.05`
+- `SOIL_NUM_TYPES = 4`, `SOIL_MIN_PIXELS = 50`, `SOIL_MIN_FRACTION = 0.10`
+  - 10% Mindestanteil filtert kleine Rand-Patches (Eckbereiche unter ~6-8%) raus. Empirisch noetig: Feld 6 hatte 5% Schluffiger Ton (228 px) die mit dem Streuer nicht gezielt erreichbar waren und Task triggerte, obwohl die drei dominanten Boeden im Soll waren. 5%-Schwelle war zu lax.
 
-**Fehlend (Phase 3+)**:
-- N-aware Duengen (crop-stage-spezifisch, via `nitrogenMap`). Vanilla "Duengen X/2" bleibt aktiv solange PF nicht den N-Task uebernimmt.
-- Pixel-by-Pixel-Target-Lookup (statt nur dominantem Boden). Bei gemischten Feldern (z.B. 60% Lehmiger Sand + 40% Lehm) waere die genauere Variante: pro Pixel den jeweiligen Target aus seiner Bodenart ziehen und die Differenz aufsummieren. Aktuell nimmt v1 nur den haeufigsten Boden.
+**Fehlend (Phase 4+)**:
 - Init-Mask-Filter (`bitVectorMapPHInitMask`) fuer Farmlands die teilweise Soil-Map-Coverage haben
 - "Boden-Karte kaufen"-Hinweis fuer noch nicht freigeschaltete Farmlands
+
+---
+
+## Precision Farming (Phase 3: N-aware Duengen)
+
+**Branch**: `feature/precision-farming-n` (12. Mai 2026). Implementation komplett, ersetzt vanilla "Duengen X/2"-Task wenn PF geladen ist.
+
+**Wichtige Korrektur zum urspruenglichen Phase-3-Plan**: Target haengt NICHT vom `growthState` ab. Wie bei pH ist das Target eine Funktion von **(Frucht, Bodenart)** allein. PF gibt dem Spieler den ganzen Wachstumszyklus Zeit, das Target zu erreichen -- es gibt keine stage-spezifischen Bedarfe in den Lookup-Tabellen.
+
+**nitrogenMap-Attribute** (aus Probe-Dump bestaetigt):
+- `bitVectorMap=<id>`, `firstChannel=0`, `numChannels=6`
+- `maxValue=45`, `amountPerState=5` -> 0..45 internal = 0..225 kg/ha real
+- `minimapGradientLabelName="0 - 220 kg/ha"`, `minimapLabelName="Stickstoff"`
+- `bitVectorMapNInitMask` -- "Soil-Map gekauft"-Mask (aktuell nicht zum Filtern genutzt)
+- `pfModule` -- Backref zur zentralen PF-Instanz
+- Methode `getNitrogenValueFromInternalValue(internalValue)` ist verfuegbar (bevorzugt), sonst Fallback `max(0, (internal - 1) * 5)` weil internal=0 und internal=1 beide als 0 kg/ha angezeigt werden (uninitialisiert + initial).
+- `nitrogenValues` -- Display-Lookup table (analog `pHValues`); brauchen wir nicht, weil `getNitrogenValueFromInternalValue` die Konversion macht.
+
+**Target-Lookup-Struktur** (`nitrogenMap.fruitTypeIndexToFruitRequirement`):
+```
+[fruitTypeIndex] = {
+    averageTargetLevel = 35,            -- Anzeige-Wert (Mittel ueber Boeden)
+    fruitTypeName = "WHEAT",
+    bySoilType = {
+        [1] = { targetLevel=29, reduction=28, yieldPotential=0.80 },  -- Lehmiger Sand
+        [2] = { targetLevel=37, reduction=32, yieldPotential=1.00 },  -- Sandiger Lehm
+        [3] = { targetLevel=41, reduction=36, yieldPotential=1.25 },  -- Lehm
+        [4] = { targetLevel=33, reduction=32, yieldPotential=0.90 },  -- Schluffiger Ton
+    },
+    ignoreOverfertilization = false,
+    alwaysAllowFertilization = false,
+    requiresDefaultMode = false,
+    ...
+}
+```
+- `targetLevel` (internal states) ist der "Regular Rate"-Auto-Apply-Zielwert
+- `reduction` ist der niedrigere "Reduced Rate"-Zielwert (3-5 states drunter), nutzen wir nicht
+- Fruechte ohne N-Bedarf (Gras=7, Pappel=22, POPLAR=25, Hafer-Forage=27, MEADOW=28, GRASS=35) haben `averageTargetLevel=0` -- Lookup liefert nil, kein Task.
+
+**yieldCurve** (`nitrogenMap.yieldCurve`, time = avgInternal - target):
+- time=0 -> 100%, -2 -> 95%, -4 -> 90%, -8 -> 82%, -12 -> 70%, -16 -> 58%, -20 -> 40%
+
+**Schwellen-Konstanten** in `MyTodosFields.lua`:
+- `N_GAP_STATES = 4` -- Trigger fuer Task: `avgInternal < target - 4` (~ 90% Yield, entspricht 20 kg/ha unter Target)
+- `N_HEAVY_GAP_STATES = 8` -- Suffix `", N-Mangel"` bei `avgInternal <= target - 8` (~ 82% Yield)
+
+**Per-Soil Polygon-Sampling N** (`MyTodos:sampleNPerSoil`):
+- Analog `samplePhPerSoil`: N-Modifier liest die N-Werte, Soil-Filter trennt nach Bodentyp.
+- Liefert `table[soilIdx] = { avgInternal, pixelArea }`.
+
+**Label-Logik** (`fertilizerTaskPf`):
+- Per-Soil N-Avg lesen
+- Pro Bodentyp: Target via `nitrogenMap.fruitTypeIndexToFruitRequirement[fruitIdx].bySoilType[soilIdx].{targetLevel, reduction}`. Frucht mit `averageTargetLevel=0` (Gras etc.) oder Boden ohne Eintrag -> kein Target, skip.
+- **Trigger**: `entry.reduction` wenn vorhanden (PF's "Reduced Rate"-Auto-Apply-Zielwert), sonst Fallback `target - N_GAP_STATES`. Begruendung: `reduction` ist der Wert unter dem PF auto-apply re-feuert. Ueber dieser Schwelle zeigt PF "grün" und appliziert nichts mehr -- MyTodos sollte konsistent dazu schweigen. Trigger gegen `target` direkt war zu strikt: bei einem mit Reduced Rate behandelten Feld lag avg knapp ueber reduction aber knapp unter target → Task feuerte staendig obwohl PF zufrieden war.
+- Bodentypen unter `SOIL_MIN_PIXELS` / `SOIL_MIN_FRACTION` werden ignoriert
+- Reportet wird der Boden mit dem groessten Abstand UNTER dem Trigger (nicht unter dem Target -- so gewinnt echte Unterversorgung, nicht das hoechste absolute Target). Bei `gap_unter_trigger >= N_HEAVY_GAP_STATES` -> `", N-Mangel"`-Suffix.
+- Label-Format: `"N: 35/85 kg/ha (Weizen, Lehm)"` -- angezeigt wird `target` (das was der Spieler intuitiv als "Ziel" sieht), nicht der interne Trigger.
+
+**Soil-Sampler wird wiederverwendet** (`sampleDominantSoilType` aus pH-Phase). Bodenart bestimmt das `bySoilType[idx].targetLevel`. v1 nimmt dominanten Boden (gleicher Trade-off wie bei pH: gemischte Felder bekommen den Target des haeufigsten Bodens).
+
+**Label-Format**: `"N: 35/85 kg/ha (Weizen, Lehm)"` -- aktuell/Ziel/Frucht/Boden. Suffix `", N-Mangel"` bei starker Unterversorgung. Bei Bedarf finetunen.
+
+**In `deriveParallelVanilla`**: bei aktivem PF nur `fertilizerTaskPf`, ohne PF vanilla "Duengen X/2" mit Lockout-Heuristik. Kein Misch-Modus, kein Lockout unter PF (weil wir den N-Wert direkt aus der Map lesen).
+
+**Edge Cases**:
+1. **Regrowing Fruechte** (Gras, Sugarcane): `fruit.regrows`-Check filtert sie raus, bevor wir sampeln.
+2. **Frucht noch nicht da** (frisch gesaet, growthState=1): `stillGrowing`-Check im Caller (`growth >= 1 and growth < minHarvest`) erfasst Stage 1 mit -- wir pruefen dann gegen das Target. In der Praxis ist nach Saat-Spritze der N-Wert schon nahe am Target.
+3. **Soil-Map nicht gekauft fuer Farmland**: `avgInternal < 1` -> kein Task. Wie bei pH bewusst keine "Bodenkarte kaufen"-Empfehlung (siehe offene TODOs).
+4. **Frucht ohne PF-Eintrag** in `fruitTypeIndexToFruitRequirement` (Mod-Fruechte): Lookup liefert nil -> kein Task.
+
+**Fehlend (Phase 4+)**:
+- Pixel-by-Pixel-Target-Lookup statt dominanter Boden (analog pH-TODO)
+- Init-Mask-Filter (`bitVectorMapNInitMask`) explizit auswerten
+- N-Offset-Beruecksichtigung (`bitVectorMapNOffset` = pro-Pixel-Verschiebung des Targets via Spielerinput, default 0). Aktuell ignoriert.
 
 ---
 
@@ -381,7 +453,7 @@ Discovery + Task-Derivation live (10. Mai 2026). HUD zeigt eine zweite Sektion "
 
 ## Offene Themen / Was wir noch wollten
 
-1. **PrecisionFarming Phase 3+**: pH-Kalken ist live (Phase 1+2). Noch offen: N-aware Duengen (crop-stage-spezifisch), Polygon-pH-Sampling statt Center-Spot, "Boden-Karte kaufen"-Hinweis.
+1. **PrecisionFarming Phase 4+**: pH-Kalken (Phase 1+2), N-Duengen (Phase 3) und Per-Soil-Target-Lookup (Phase 3.5) sind live. Noch offen: "Boden-Karte kaufen"-Hinweis fuer Farmlands ohne soilMap-Sampling, N-Offset-Beruecksichtigung (`bitVectorMapNOffset`).
 2. **Tier-Husbandries**: siehe oben. Probe läuft, Discovery + Tasks fehlen noch.
 3. **Düngen-Lockout-Persistence**: optional, nice-to-have.
 4. **`weedFactor`-Schwelle**: User hat angemerkt dass `Unkraut` ohne Prozent (weedState=1, weedFactor=0) ggf. nervt — Trigger könnte auf `weedFactor > 0` oder kleine Schwelle geschärft werden.
