@@ -972,6 +972,23 @@ function MyTodos:consoleProbePfCmd(arg)
         deepDump("pHMap.valueTransformations", pf.pHMap.valueTransformations, 2)
         deepDump("pHMap.limeUsage", pf.pHMap.limeUsage, 2)
     end
+    if pf.nitrogenMap ~= nil then
+        Logging.info("[MyTodos] === nitrogenMap Lookup-Tabellen (fuer N-Target) ===")
+        deepDump("nitrogenMap.fruitRequirements", pf.nitrogenMap.fruitRequirements, 4)
+        deepDump("nitrogenMap.fruitTypeIndexToFruitRequirement",
+            pf.nitrogenMap.fruitTypeIndexToFruitRequirement, 2)
+        deepDump("nitrogenMap.nitrogenValues", pf.nitrogenMap.nitrogenValues, 2)
+        deepDump("nitrogenMap.yieldCurve", pf.nitrogenMap.yieldCurve, 3)
+        deepDump("nitrogenMap.applicationRates", pf.nitrogenMap.applicationRates, 3)
+        deepDump("nitrogenMap.initialValues", pf.nitrogenMap.initialValues, 2)
+        deepDump("nitrogenMap.initialSprayLevelBonus", pf.nitrogenMap.initialSprayLevelBonus, 2)
+        deepDump("nitrogenMap.nOffsetIndexToOffset", pf.nitrogenMap.nOffsetIndexToOffset, 2)
+        deepDump("nitrogenMap.fertilizerFillTypes", pf.nitrogenMap.fertilizerFillTypes, 2)
+        deepDump("nitrogenMap.fertilizerUsage", pf.nitrogenMap.fertilizerUsage, 2)
+        deepDump("nitrogenMap.cropSensorFruitTypes", pf.nitrogenMap.cropSensorFruitTypes, 2)
+        deepDump("nitrogenMap.valueFilter", pf.nitrogenMap.valueFilter, 2)
+        deepDump("nitrogenMap.valueFilterEnabled", pf.nitrogenMap.valueFilterEnabled, 2)
+    end
     if pf.soilMap ~= nil then
         Logging.info("[MyTodos] === soilMap Bodenart-Infos ===")
         deepDump("soilMap.soilTypes", pf.soilMap.soilTypes, 2)
