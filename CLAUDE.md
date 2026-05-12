@@ -315,10 +315,131 @@ Die zentrale PF-Instanz erreicht man indirekt via `pHMap.pfModule`. Auch `g_modM
 - `SOIL_NUM_TYPES = 4`, `SOIL_MIN_PIXELS = 50`, `SOIL_MIN_FRACTION = 0.05`
 
 **Fehlend (Phase 3+)**:
-- N-aware Duengen (crop-stage-spezifisch, via `nitrogenMap`). Vanilla "Duengen X/2" bleibt aktiv solange PF nicht den N-Task uebernimmt.
+- N-aware Duengen (crop-stage-spezifisch, via `nitrogenMap`). **Aktuell in Arbeit auf branch `feature/precision-farming-n` -- siehe "Phase 3 Handoff" unten.**
 - Pixel-by-Pixel-Target-Lookup (statt nur dominantem Boden). Bei gemischten Feldern (z.B. 60% Lehmiger Sand + 40% Lehm) waere die genauere Variante: pro Pixel den jeweiligen Target aus seiner Bodenart ziehen und die Differenz aufsummieren. Aktuell nimmt v1 nur den haeufigsten Boden.
 - Init-Mask-Filter (`bitVectorMapPHInitMask`) fuer Farmlands die teilweise Soil-Map-Coverage haben
 - "Boden-Karte kaufen"-Hinweis fuer noch nicht freigeschaltete Farmlands
+
+---
+
+## Phase 3 Handoff (PF N-aware Duengen, work-in-progress)
+
+**Branch**: `feature/precision-farming-n` (HEAD `a48f9d2` Stand 12. Mai 2026). Enthaelt aktuell NUR die mtProbePf-Erweiterung fuer N-Lookup-Tabellen. Noch keine Implementation.
+
+### Naechster Schritt
+
+User soll `mtProbePf` im Spiel laufen lassen, Output in `n_dump.txt` legen (ist via `.gitignore` `*_dump.txt`-Pattern ignoriert). Wir lesen das Dump und ermitteln die Struktur von:
+- `nitrogenMap.fruitRequirements` -- vermutete (fruit, growthState) -> N-Target
+- `nitrogenMap.fruitTypeIndexToFruitRequirement` -- Mapping fruitTypeIndex -> Eintrag
+- `nitrogenMap.nitrogenValues` -- Display-Lookup analog `pHValues`
+- `nitrogenMap.yieldCurve` -- N-Yield-Penalty-Kurve
+- Plus applicationRates, initialValues, nOffsetIndexToOffset
+
+### Bekannte nitrogenMap-Attribute (aus pHMap-Probe-Dump uebernommen)
+
+- `bitVectorMap=<id>`, `firstChannel=0`, `numChannels=6` (Range 0..63 theoretisch)
+- `maxValue=45`, `maxVisibleValue=45` -> effektiv 0..45 internal
+- `amountPerState=5` -- kg N/ha pro internal state, also 0..45 = 0..225 kg/ha
+- `minimapGradientLabelName="0 - 220 kg/ha"`, `minimapLabelName="Stickstoff"`
+- `bitVectorMapNInitMask` -- "Soil-Map gekauft"-Mask analog pHMap
+- `bitVectorMapNFruitFilterMask`, `bitVectorMapNFruitDestroyMask` -- frucht-bezogene Masks
+- `bitVectorMapNOffset`, `bitVectorMapNStateChange` -- offset/state-change overlays
+- `stateChangeDefault=20` -- Default-Application-Stufe
+- `pfModule` -- Backref zur zentralen PF-Instanz (so kommen wir an pHMap/soilMap)
+- Methoden bekannt: `getNitrogenValueFromInternalValue(v)`, `getNitrogenFromChangedStates(states)`, `getMinMaxValue()`, `getFertilizerUsage(...)`, `getFruitTypeIndexByFruitRequirementIndex(idx)`, `getNitrogenAmountFromFillType(ft)`
+
+### Architektur (vorgesehen, analog zu pH)
+
+Implementation in `MyTodosFields.lua`, exakt das Pattern das wir bei pH gebaut haben:
+
+```lua
+function MyTodos:findPfNitrogenMap()
+    -- Cache. Scan vehicleSystem.vehicles fuer spec_*.nitrogenMap.
+    -- Oder einfacher: pHMap haben wir schon, return pHMap.pfModule.nitrogenMap
+end
+
+function MyTodos:initNitrogenSampler()
+    -- Analog initPhSampler: DensityMapModifier.new(
+    --   nitrogenMap.bitVectorMap, firstChannel=0, numChannels=6,
+    --   terrainRootNode)
+end
+
+function MyTodos:sampleNForField(field)
+    -- Analog samplePhForField: polygon executeGet, avgInternal = sum/area
+    -- Konvertierung via nitrogenMap:getNitrogenValueFromInternalValue
+    -- Liefert { real=kg_per_ha, internal=avg }
+end
+
+function MyTodos:lookupNTargetForFruit(fruitTypeIndex, growthState)
+    -- Aus nitrogenMap.fruitRequirements / fruitTypeIndexToFruitRequirement.
+    -- Struktur erst nach Probe-Dump klar.
+    -- Vermutung: liefert {target_internal, tolerance_internal}.
+end
+
+function MyTodos:fertilizerTaskPf(field, fs, fruit)
+    if not self:isPfActive() then return nil end
+    -- Nur wenn Frucht da + im "duengbaren" Wachstumsstadium
+    if fruit == nil then return nil end
+    local n = self:sampleNForField(field)
+    if n == nil then return nil end
+    local target = self:lookupNTargetForFruit(fruit.index, fs.growthState)
+    if target == nil then return nil end
+    if n.internal >= target.optimal - target.tolerance then return nil end
+    return string.format("N: %d/%d kg/ha (%s)",
+        n.real, target.realOptimal, self:fruitName(fruit))
+end
+```
+
+### Integration in `deriveParallelVanilla`
+
+Aktuell (siehe `MyTodosFields.lua`):
+```lua
+-- Duengen: klassische Spritze, nur fuer nicht-regrowing Fruechte
+if stillGrowing and not fruit.regrows
+        and spray < sprayMax
+        and not self:isFertLocked(fieldId, fs) then
+    table.insert(out, string.format("Duengen %d/%d", spray, sprayMax))
+end
+```
+
+Neu:
+```lua
+if stillGrowing and not fruit.regrows then
+    if self:isPfActive() then
+        local task = self:fertilizerTaskPf(field, fs, fruit)
+        if task ~= nil then table.insert(out, task) end
+    elseif spray < sprayMax and not self:isFertLocked(fieldId, fs) then
+        table.insert(out, string.format("Duengen %d/%d", spray, sprayMax))
+    end
+end
+```
+
+Wichtig: **PF aktiv -> KEINE Lockout-History-Logik** (`isFertLocked`/`updateFieldHistory` weiter ueber sprayLevel). Mit PF lesen wir den N-Wert direkt aus der Map, also keine Schwelle-Erhoehung-mit-Verzoegerung mehr. Lockout existiert weiter (Vanilla-Pfad), aber wird unter PF einfach uebersprungen.
+
+### Label-Format-Vorschlag
+
+`"N: 35/80 kg/ha (Roggen)"` -- aktuell/Ziel/Frucht. Konsistent mit `"Kalk: pH 5.8 / 6.5 (Sandiger Lehm)"`.
+
+Falls Target *stark* unterschritten: Suffix `", N-Mangel"` o.ae. analog `", stark sauer"` -- aber erst nach Probe entscheiden, weil yieldCurve evtl. anders steil ist als bei pH.
+
+### Edge Cases zum Bedenken
+
+1. **Frucht-Wachstumsphase passt nicht**: nicht jede growthState braucht N. Z.B. unmittelbar vor der Ernte ist N-Duengen sinnlos. PF kennt das vermutlich ueber `fruitRequirements[fruit].stages[growthState]` -- wenn nil, kein Target.
+2. **Frucht noch nicht da (frisch gesaet)**: growthState 1 (invisible) hat evtl. eigenen Bedarf (Startduengung). Pruefen.
+3. **Regrowing Fruechte (Gras, Sugarcane)**: kein Duengen-Loop. PF kuemmert sich um die nicht. Wir auch nicht -- bestehender `not fruit.regrows`-Check bleibt.
+4. **Soil-Map nicht gekauft fuer Farmland**: `bitVectorMapNInitMask` ist 0 -> N-Wert nicht auslesbar. Analog zu pH: `avgInternal < 1` -> kein Task.
+
+### Files die geaendert werden
+
+- `scripts/MyTodosFields.lua` -- Sampler + Lookup + fertilizerTaskPf, Integration in deriveParallelVanilla
+- `CLAUDE.md` -- Phase 3 Doku-Update (Lookup-Struktur, Trigger-Schwelle, Label-Format)
+- KEINE Aenderung an `MyTodos.lua`, `MyTodosCommands.lua` (Probe ist schon erweitert), `modDesc.xml`
+
+### Nach Implementation
+
+1. Test im Spiel: Feld mit Frucht in Wachstumsphase -> N-Task erscheint mit kg/ha-Werten passend zum PF-Sprayer-HUD
+2. Verifizieren: PF-Auto-Apply spruehen waehrend MyTodos Task zeigt -> Task verschwindet (oder Wert sinkt) bei vollstaendiger Duengung
+3. Merge auf main wenn ok
 
 ---
 
