@@ -8,10 +8,12 @@
 
 -- Sampler-Schwellen ------------------------------------------------
 
+-- labelKey: l10n-Key, wird in initWindrowSampler aufgeloest (einmalig zur
+-- Sampler-Init-Zeit). Spielsprache wechselt im laufenden Spiel nicht.
 MyTodos.WINDROW_TYPES = {
-    { name = "STRAW",            label = "Stroh aufnehmen" },
-    { name = "GRASS_WINDROW",    label = "Gras-Schwad aufnehmen" },
-    { name = "DRYGRASS_WINDROW", label = "Heu aufnehmen" },
+    { name = "STRAW",            labelKey = "myTodos_windrow_straw" },
+    { name = "GRASS_WINDROW",    labelKey = "myTodos_windrow_grass" },
+    { name = "DRYGRASS_WINDROW", labelKey = "myTodos_windrow_hay" },
 }
 
 -- Mindestens so viele Pixel muessen ein bestimmten Schwadtyp haben, sonst
@@ -254,7 +256,7 @@ function MyTodos:initWindrowSampler()
                 local filter = DensityMapFilter.new(mod)
                 filter:setValueCompareParams(DensityValueCompareType.EQUAL, ft.textureArrayIndex)
                 table.insert(self.windrowFilters, {
-                    label = def.label,
+                    label = self:t(def.labelKey),
                     filter = filter,
                     typeIdx = ft.textureArrayIndex,
                 })
@@ -713,10 +715,9 @@ function MyTodos:limeTaskPf(field)
     local extra = ""
     -- "stark sauer" wenn Luecke groesser als regularOffset + PH_HEAVY_GAP_STATES.
     if worst.gap >= worst.transform.regularOffset + MyTodos.PH_HEAVY_GAP_STATES then
-        extra = ", stark sauer"
+        extra = self:t("myTodos_pf_lime_strong_acid")
     end
-    return string.format("Kalk: pH %.1f / %.1f (%s%s)",
-        realPh, targetReal, soilName, extra)
+    return self:t("myTodos_pf_lime_label", realPh, targetReal, soilName, extra)
 end
 
 -- N-Sampler (Precision Farming) ------------------------------------
@@ -887,9 +888,9 @@ function MyTodos:fertilizerTaskPf(field, fs, fruit)
     -- (= deutlich unter reduction).
     local extra = ""
     if worst.gap >= MyTodos.N_HEAVY_GAP_STATES then
-        extra = ", N-Mangel"
+        extra = self:t("myTodos_pf_n_deficit")
     end
-    return string.format("N: %d/%d kg/ha (%s, %s%s)",
+    return self:t("myTodos_pf_n_label",
         math.floor(realKg + 0.5), math.floor(worst.target.real + 0.5),
         self:fruitName(fruit), soilName, extra)
 end
@@ -925,7 +926,7 @@ end
 
 function MyTodos:deriveFieldTask(field, fieldId)
     local fs = field.fieldState
-    if fs == nil then return "(kein fieldState)" end
+    if fs == nil then return self:t("myTodos_task_no_fieldstate") end
     return self:deriveTaskVanilla(fs, fieldId, field)
 end
 
@@ -975,14 +976,14 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
         local growth = fs.growthState or 0
 
         if withered ~= nil and growth == withered then
-            return string.format("%s: Verwelkt", name), true
+            return self:t("myTodos_fruit_withered", name), true
         end
 
         -- Regrowing-Fruechte (Gras, Sugarcane etc.): kein Pflug/Grubber/Saat-Pfad,
         -- der Wachstumszyklus laeuft automatisch.
         if fruit.regrows then
             if growth == cutState or growth == rolledCutState then
-                return string.format("%s: gemäht", name), false
+                return self:t("myTodos_fruit_cut", name), false
             end
             -- Erntefaehig:
             --   Mit Preparing-Stadium (Sugarcane: minPrep=8, maxHarvest=11):
@@ -1002,15 +1003,15 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
                 inHarvestRange = maxHarvest ~= nil and growth == maxHarvest
             end
             if inHarvestRange then
-                return string.format("%s: Ernten", name), true
+                return self:t("myTodos_fruit_harvest", name), true
             end
             if fruit.plantsWeed ~= false then
                 local label = self:weedLabel(field, fs, fieldId)
                 if label ~= nil then
-                    return string.format("%s: %s", name, label), true
+                    return self:t("myTodos_fruit_with_label", name, label), true
                 end
             end
-            return string.format("%s: Wächst (%s/%s)",
+            return self:t("myTodos_fruit_growing",
                 name, tostring(growth), tostring(maxHarvest)), false
         end
 
@@ -1027,7 +1028,7 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
             local minH = fruit.minHarvestingGrowthState or 0
             local maxH = fruit.maxHarvestingGrowthState or 0
             if minH < maxH and growth ~= cutState then
-                return string.format("%s: Wächst nach", name), false
+                return self:t("myTodos_fruit_regrowing", name), false
             end
             return self:derivePrepTask(fs, plowReq)
         end
@@ -1047,7 +1048,7 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
         if minForage ~= nil and minForage >= 1
                 and minHarvest ~= nil and minForage + 1 < minHarvest
                 and growth >= minForage and growth < minHarvest then
-            return string.format("%s: Forage", name), true
+            return self:t("myTodos_fruit_forage", name), true
         end
 
         -- Ernten: untere Grenze ist die frueheste actionable Stufe.
@@ -1062,15 +1063,15 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
         end
         if effectiveMinHarvest ~= nil and maxHarvest ~= nil
                 and growth >= effectiveMinHarvest and growth <= maxHarvest then
-            return string.format("%s: Ernten", name), true
+            return self:t("myTodos_fruit_harvest", name), true
         end
         if fruit.plantsWeed ~= false then
             local label = self:weedLabel(field, fs, fieldId)
             if label ~= nil then
-                return string.format("%s: %s", name, label), true
+                return self:t("myTodos_fruit_with_label", name, label), true
             end
         end
-        return string.format("%s: Wächst (%s/%s)",
+        return self:t("myTodos_fruit_growing",
             name, tostring(growth), tostring(maxHarvest)), false
     end
 
@@ -1103,23 +1104,24 @@ function MyTodos:weedLabel(field, fs, fieldId)
         if state == 0 or state >= 7 then return nil end
     end
     if state <= 2 then
-        return "Unkraut wachsend"
+        return self:t("myTodos_weed_emerging")
     end
-    local size = (state == 5) and "groß" or "klein"
+    local isLarge = (state == 5)
     if factor > 0 then
-        return string.format("Unkraut %s (%.0f%%)", size, factor * 100)
+        local key = isLarge and "myTodos_weed_large_pct" or "myTodos_weed_small_pct"
+        return self:t(key, factor * 100)
     end
-    return string.format("Unkraut %s", size)
+    return self:t(isLarge and "myTodos_weed_large" or "myTodos_weed_small")
 end
 
 function MyTodos:derivePrepTask(fs, plowReq)
     if plowReq and (fs.plowLevel or 0) == 0 then
-        return "Pflügen", true
+        return self:t("myTodos_task_plow"), true
     end
     if self:isSeedbedReady(fs) then
-        return "Säen", true
+        return self:t("myTodos_task_seed"), true
     end
-    return "Grubbern", true
+    return self:t("myTodos_task_cultivate"), true
 end
 
 function MyTodos:isSeedbedReady(fs)
@@ -1157,7 +1159,7 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
                     table.insert(out, pfTask)
                 end
             elseif spray < sprayMax and not self:isFertLocked(fieldId, fs) then
-                table.insert(out, string.format("Düngen %d/%d", spray, sprayMax))
+                table.insert(out, self:t("myTodos_task_fertilize", spray, sprayMax))
             end
         end
         -- Walzen: rollerLevel ist INVERTIERT. 1 = "muss gewalzt werden", 0 = erledigt.
@@ -1173,12 +1175,12 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
                 rollSafe = (growth <= 1)
             end
             if rollSafe then
-                table.insert(out, "Walzen")
+                table.insert(out, self:t("myTodos_task_roll"))
             end
         end
         -- Mulchen Stoppel: nur bei Fruechten mit echtem cutState (nicht regrowing)
         if not fruit.regrows and atCut and (fs.stubbleShredLevel or 0) == 0 then
-            table.insert(out, "Mulchen")
+            table.insert(out, self:t("myTodos_task_mulch"))
         end
     end
 
@@ -1196,14 +1198,14 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
                 table.insert(out, pfTask)
             end
         elseif (fs.limeLevel or 0) == 0 then
-            table.insert(out, "Kalken")
+            table.insert(out, self:t("myTodos_task_lime"))
         end
     end
 
     -- Steine: fs.stoneLevel taugt nicht (bleibt oft 0 trotz sichtbarer
     -- Steine) -> direkt auf stoneSystem.densityMap polygon-sampeln.
     if field ~= nil and self:fieldHasStones(field) then
-        table.insert(out, "Steine")
+        table.insert(out, self:t("myTodos_task_stones"))
     end
 
     -- Schwadläden auf dem Feld (Stroh, Gras, Heu) via Density-Map-Sampling

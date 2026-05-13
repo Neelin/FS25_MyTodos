@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<l10n>
+    <texts>
+        <!-- Action bindings (engine displays these in the keybinding menu) -->
+        <text name="input_MYTODOS_TOGGLE_SETTINGS"  text="MyTodos: Toggle settings panel"/>
+        <text name="input_MYTODOS_TOGGLE_HUD"       text="MyTodos: Toggle HUD"/>
+
+        <!-- HUD -->
+        <text name="myTodos_hud_title"              text="MyTodos"/>
+        <text name="myTodos_hud_no_owned"           text="(no owned fields/animals)"/>
+        <text name="myTodos_hud_nothing_to_do"      text="(nothing to do)"/>
+        <text name="myTodos_hud_more"               text="(+%d more)"/>
+        <text name="myTodos_hud_field_row"          text="F%s  %s"/>
+        <text name="myTodos_section_fields"         text="Fields"/>
+        <text name="myTodos_section_animals"        text="Animals"/>
+
+        <!-- Settings dialog -->
+        <text name="myTodos_settings_title"         text="MyTodos - Settings"/>
+        <text name="myTodos_settings_close"         text="Close"/>
+        <text name="myTodos_group_animals"          text="Animals"/>
+        <text name="myTodos_setting_hudVisible"            text="Show HUD"/>
+        <text name="myTodos_setting_foodThreshold"         text="Food below"/>
+        <text name="myTodos_setting_waterThreshold"        text="Water below"/>
+        <text name="myTodos_setting_strawThreshold"        text="Straw below"/>
+        <text name="myTodos_setting_meadowThreshold"       text="Pasture below"/>
+        <text name="myTodos_setting_manureThreshold"       text="Manure above"/>
+        <text name="myTodos_setting_liquidManureThreshold" text="Slurry above"/>
+        <text name="myTodos_setting_milkThreshold"         text="Milk above"/>
+
+        <!-- Task: vanilla -->
+        <text name="myTodos_task_plow"              text="Plow"/>
+        <text name="myTodos_task_seed"              text="Sow"/>
+        <text name="myTodos_task_cultivate"         text="Cultivate"/>
+        <text name="myTodos_task_roll"              text="Roll"/>
+        <text name="myTodos_task_mulch"             text="Mulch"/>
+        <text name="myTodos_task_lime"              text="Lime"/>
+        <text name="myTodos_task_stones"            text="Stones"/>
+        <text name="myTodos_task_fertilize"         text="Fertilize %d/%d"/>
+        <text name="myTodos_task_no_fieldstate"     text="(no fieldState)"/>
+
+        <!-- Fruit lifecycle (placeholder %s = fruit name) -->
+        <text name="myTodos_fruit_withered"         text="%s: Withered"/>
+        <text name="myTodos_fruit_cut"              text="%s: cut"/>
+        <text name="myTodos_fruit_harvest"          text="%s: Harvest"/>
+        <text name="myTodos_fruit_forage"           text="%s: Forage"/>
+        <text name="myTodos_fruit_growing"          text="%s: Growing (%s/%s)"/>
+        <text name="myTodos_fruit_regrowing"        text="%s: Regrowing"/>
+        <text name="myTodos_fruit_with_label"       text="%s: %s"/>
+
+        <!-- Weeds -->
+        <text name="myTodos_weed_emerging"          text="Weeds emerging"/>
+        <text name="myTodos_weed_large_pct"         text="Weeds large (%.0f%%)"/>
+        <text name="myTodos_weed_small_pct"         text="Weeds small (%.0f%%)"/>
+        <text name="myTodos_weed_large"             text="Weeds large"/>
+        <text name="myTodos_weed_small"             text="Weeds small"/>
+
+        <!-- Precision Farming tasks -->
+        <text name="myTodos_pf_lime_label"          text="Lime: pH %.1f / %.1f (%s%s)"/>
+        <text name="myTodos_pf_lime_strong_acid"    text=", strongly acidic"/>
+        <text name="myTodos_pf_n_label"             text="N: %d/%d kg/ha (%s, %s%s)"/>
+        <text name="myTodos_pf_n_deficit"           text=", N deficit"/>
+
+        <!-- Windrows -->
+        <text name="myTodos_windrow_straw"          text="Pick up straw"/>
+        <text name="myTodos_windrow_grass"          text="Pick up grass windrow"/>
+        <text name="myTodos_windrow_hay"            text="Pick up hay"/>
+
+        <!-- Husbandries -->
+        <text name="myTodos_husb_default_name"      text="Animals"/>
+        <text name="myTodos_husb_food"              text="Food %.0f%%"/>
+        <text name="myTodos_husb_water"             text="Water %.0f%%"/>
+        <text name="myTodos_husb_meadow"            text="Pasture %.0f%%"/>
+        <text name="myTodos_husb_straw"             text="Straw %.0f%%"/>
+        <text name="myTodos_husb_manure"            text="Manure %.0f%%"/>
+        <text name="myTodos_husb_liquid_manure"     text="Slurry %.0f%%"/>
+        <text name="myTodos_husb_pallets_full_suffix" text=" (full)"/>
+        <text name="myTodos_husb_pallets_full"      text="Pallets full"/>
+    </texts>
+</l10n>

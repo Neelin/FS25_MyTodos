@@ -593,10 +593,11 @@ end
 -- Discovery + Task-Derivation ---------------------------------------
 
 function MyTodos:_husbandryName(p)
+    local fallback = self:t("myTodos_husb_default_name")
     local anim = p.spec_husbandryAnimals
-    if anim == nil or anim.animalType == nil then return "Tiere" end
+    if anim == nil or anim.animalType == nil then return fallback end
     local at = anim.animalType
-    return at.groupTitle or at.name or "Tiere"
+    return at.groupTitle or at.name or fallback
 end
 
 function MyTodos:_husbandryNumAnimals(p)
@@ -709,7 +710,7 @@ function MyTodos:deriveHusbandryTask(entry)
     local foodRatio = self:_specFillRatio(p, food, "capacity")
     if foodRatio ~= nil
             and foodRatio < self:_pctThreshold("foodThreshold", 20) / 100 then
-        table.insert(parts, string.format("Futter %.0f%%", foodRatio * 100))
+        table.insert(parts, self:t("myTodos_husb_food", foodRatio * 100))
     end
 
     -- Wasser (nur wenn manuell)
@@ -717,7 +718,7 @@ function MyTodos:deriveHusbandryTask(entry)
     if water ~= nil and water.automaticWaterSupply == false then
         local r = self:_waterRatio(p, water)
         if r ~= nil and r < self:_pctThreshold("waterThreshold", 20) / 100 then
-            table.insert(parts, string.format("Wasser %.0f%%", r * 100))
+            table.insert(parts, self:t("myTodos_husb_water", r * 100))
         end
     end
 
@@ -726,7 +727,7 @@ function MyTodos:deriveHusbandryTask(entry)
     local meadowRatio = self:_meadowRatio(meadow)
     if meadowRatio ~= nil
             and meadowRatio < self:_pctThreshold("meadowThreshold", 20) / 100 then
-        table.insert(parts, string.format("Weide %.0f%%", meadowRatio * 100))
+        table.insert(parts, self:t("myTodos_husb_meadow", meadowRatio * 100))
     end
 
     -- Stroh (Input - "leer = nachfuellen", umgekehrt zu Mist/Guelle)
@@ -734,7 +735,7 @@ function MyTodos:deriveHusbandryTask(entry)
     if straw ~= nil and straw.inputFillType ~= nil then
         local r = self:_filltypeRatio(p, straw.inputFillType)
         if r ~= nil and r < self:_pctThreshold("strawThreshold", 20) / 100 then
-            table.insert(parts, string.format("Stroh %.0f%%", r * 100))
+            table.insert(parts, self:t("myTodos_husb_straw", r * 100))
         end
     end
 
@@ -751,7 +752,7 @@ function MyTodos:deriveHusbandryTask(entry)
     if manureFt ~= nil then
         local r = self:_filltypeRatio(p, manureFt)
         if r ~= nil and r >= self:_pctThreshold("manureThreshold", 80) / 100 then
-            table.insert(parts, string.format("Mist %.0f%%", r * 100))
+            table.insert(parts, self:t("myTodos_husb_manure", r * 100))
         end
     end
 
@@ -760,7 +761,7 @@ function MyTodos:deriveHusbandryTask(entry)
     if lmanure ~= nil and lmanure.fillType ~= nil then
         local r = self:_filltypeRatio(p, lmanure.fillType)
         if r ~= nil and r >= self:_pctThreshold("liquidManureThreshold", 80) / 100 then
-            table.insert(parts, string.format("Guelle %.0f%%", r * 100))
+            table.insert(parts, self:t("myTodos_husb_liquid_manure", r * 100))
         end
     end
 
@@ -809,13 +810,13 @@ function MyTodos:deriveHusbandryTask(entry)
             for _, e in ipairs(entries) do table.insert(texts, e.text) end
             local s = table.concat(texts, ", ")
             if pal.palletLimitReached then
-                s = s .. " (voll)"
+                s = s .. self:t("myTodos_husb_pallets_full_suffix")
             end
             table.insert(parts, s)
         elseif pal.palletLimitReached then
             -- Edge case: Limit erreicht direkt nach Pallet-Spawn (Buffer
             -- bereits zurueckgesetzt). Production gestoppt -> Hinweis.
-            table.insert(parts, "Paletten voll")
+            table.insert(parts, self:t("myTodos_husb_pallets_full"))
         end
     end
 

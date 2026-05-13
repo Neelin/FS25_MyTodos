@@ -16,6 +16,8 @@
     <iconFilename>icon.png</iconFilename>
     <multiplayer supported="true"/>
 
+    <l10n filenamePrefix="l10n/l10n"/>
+
     <extraSourceFiles>
         <sourceFile filename="scripts/MyTodosSettingsScreen.lua"/>
         <sourceFile filename="scripts/MyTodos.lua"/>

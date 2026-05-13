@@ -66,22 +66,87 @@ MyTodos.PERCENT_STEP = 5
 MyTodos.PERCENT_MIN = 5
 MyTodos.PERCENT_MAX = 95
 
+-- labelKey / groupKey sind l10n-Keys (aus l10n/l10n_<lang>.xml).
+-- Werden zur Render-Zeit ueber MyTodos:t() aufgeloest.
 MyTodos.SETTING_DEFS = {
     -- hudVisible kann auch via Tastenkombi (Default: RShift+T, Action
     -- MYTODOS_TOGGLE_HUD) umgeschaltet werden. Hier als Fallback im
     -- Settings-Dialog, falls die Tastenbelegung vergessen wurde.
-    { key = "hudVisible",  label = "HUD anzeigen",  type = "bool",    default = true },
+    { key = "hudVisible",  labelKey = "myTodos_setting_hudVisible",  type = "bool",    default = true },
     -- Schwellwerte: Trigger wenn Wert unter/ueber dieser Marke ist.
     -- "Futter unter 20%" heisst: Task erscheint sobald Trog unter 20% voll.
     -- "Mist ueber 80%" heisst: Task erscheint sobald Lager ueber 80% voll.
-    { key = "foodThreshold",         label = "Futter unter",  type = "percent", default = 20, group = "Tiere" },
-    { key = "waterThreshold",        label = "Wasser unter",  type = "percent", default = 20, group = "Tiere" },
-    { key = "strawThreshold",        label = "Stroh unter",   type = "percent", default = 20, group = "Tiere" },
-    { key = "meadowThreshold",       label = "Weide unter",   type = "percent", default = 20, group = "Tiere" },
-    { key = "manureThreshold",       label = "Mist ueber",    type = "percent", default = 80, group = "Tiere" },
-    { key = "liquidManureThreshold", label = "Guelle ueber",  type = "percent", default = 80, group = "Tiere" },
-    { key = "milkThreshold",         label = "Milch ueber",   type = "percent", default = 80, group = "Tiere" },
+    { key = "foodThreshold",         labelKey = "myTodos_setting_foodThreshold",         type = "percent", default = 20, groupKey = "myTodos_group_animals" },
+    { key = "waterThreshold",        labelKey = "myTodos_setting_waterThreshold",        type = "percent", default = 20, groupKey = "myTodos_group_animals" },
+    { key = "strawThreshold",        labelKey = "myTodos_setting_strawThreshold",        type = "percent", default = 20, groupKey = "myTodos_group_animals" },
+    { key = "meadowThreshold",       labelKey = "myTodos_setting_meadowThreshold",       type = "percent", default = 20, groupKey = "myTodos_group_animals" },
+    { key = "manureThreshold",       labelKey = "myTodos_setting_manureThreshold",       type = "percent", default = 80, groupKey = "myTodos_group_animals" },
+    { key = "liquidManureThreshold", labelKey = "myTodos_setting_liquidManureThreshold", type = "percent", default = 80, groupKey = "myTodos_group_animals" },
+    { key = "milkThreshold",         labelKey = "myTodos_setting_milkThreshold",         type = "percent", default = 80, groupKey = "myTodos_group_animals" },
 }
+
+-- l10n-Helper: zieht einen Text aus l10n/l10n_<lang>.xml und applied
+-- string.format wenn weitere Argumente uebergeben werden. Fallback
+-- (g_i18n nicht da) liefert den Key, damit nichts crasht.
+function MyTodos:t(key, ...)
+    if g_i18n == nil or type(g_i18n.getText) ~= "function" then
+        return key
+    end
+    local text = g_i18n:getText(key)
+    if select("#", ...) > 0 then
+        return string.format(text, ...)
+    end
+    return text
+end
+
+-- Liste aller l10n-Keys die irgendwo im Code per self:t() referenziert
+-- werden. Single source of truth fuer den Self-Check beim Mod-Start.
+-- Wenn ein neuer Key dazukommt: hier eintragen damit der Check ihn
+-- mitvalidiert (und beide Sprachdateien gepflegt werden).
+MyTodos.L10N_KEYS = {
+    "myTodos_hud_title", "myTodos_hud_no_owned", "myTodos_hud_nothing_to_do",
+    "myTodos_hud_more", "myTodos_hud_field_row",
+    "myTodos_section_fields", "myTodos_section_animals",
+    "myTodos_settings_title", "myTodos_settings_close",
+    "myTodos_group_animals",
+    "myTodos_setting_hudVisible", "myTodos_setting_foodThreshold",
+    "myTodos_setting_waterThreshold", "myTodos_setting_strawThreshold",
+    "myTodos_setting_meadowThreshold", "myTodos_setting_manureThreshold",
+    "myTodos_setting_liquidManureThreshold", "myTodos_setting_milkThreshold",
+    "myTodos_task_plow", "myTodos_task_seed", "myTodos_task_cultivate",
+    "myTodos_task_roll", "myTodos_task_mulch", "myTodos_task_lime",
+    "myTodos_task_stones", "myTodos_task_fertilize",
+    "myTodos_task_no_fieldstate",
+    "myTodos_fruit_withered", "myTodos_fruit_cut", "myTodos_fruit_harvest",
+    "myTodos_fruit_forage", "myTodos_fruit_growing", "myTodos_fruit_regrowing",
+    "myTodos_fruit_with_label",
+    "myTodos_weed_emerging", "myTodos_weed_large_pct", "myTodos_weed_small_pct",
+    "myTodos_weed_large", "myTodos_weed_small",
+    "myTodos_pf_lime_label", "myTodos_pf_lime_strong_acid",
+    "myTodos_pf_n_label", "myTodos_pf_n_deficit",
+    "myTodos_windrow_straw", "myTodos_windrow_grass", "myTodos_windrow_hay",
+    "myTodos_husb_default_name", "myTodos_husb_food", "myTodos_husb_water",
+    "myTodos_husb_meadow", "myTodos_husb_straw", "myTodos_husb_manure",
+    "myTodos_husb_liquid_manure", "myTodos_husb_pallets_full_suffix",
+    "myTodos_husb_pallets_full",
+}
+
+-- Validiert beim Mod-Start dass alle in MyTodos.L10N_KEYS gelisteten Keys
+-- in der aktuellen Sprachdatei existieren. Schweigt wenn alles passt;
+-- sonst eine sammelnde Warning ins Log. Hilft uns wenn jemand eine neue
+-- Sprache anlegt oder einen Key vergisst zu pflegen.
+function MyTodos:checkL10n()
+    if g_i18n == nil or type(g_i18n.hasText) ~= "function" then return end
+    local missing = {}
+    for _, key in ipairs(MyTodos.L10N_KEYS) do
+        if not g_i18n:hasText(key) then
+            table.insert(missing, key)
+        end
+    end
+    if #missing == 0 then return end
+    Logging.warning("[MyTodos] %d l10n key(s) missing in active language: %s",
+        #missing, table.concat(missing, ", "))
+end
 
 -- Lifecycle ---------------------------------------------------------
 
@@ -112,6 +177,7 @@ function MyTodos:onMapLoaded()
     end
 
     self:loadSettings()
+    self:checkL10n()
     self:setupGui()
 
     if g_currentMission ~= nil and g_currentMission.addUpdateable ~= nil then
@@ -372,7 +438,7 @@ function MyTodos:drawHud()
     local padX = MyTodos.HUD_PAD_X
     local padY = MyTodos.HUD_PAD_Y
 
-    local titleText = "MyTodos"
+    local titleText = self:t("myTodos_hud_title")
     setTextBold(true)
     local maxW = getTextWidth(titleSize, titleText)
     setTextBold(false)
@@ -393,11 +459,11 @@ function MyTodos:drawHud()
 
     -- Schreibt bis maxLines Tasks aus `tasks` (formatiert via fmt) ins
     -- rows-Array. Wenn ueberlaeuft, eine "(+N weitere)"-Zeile am Ende.
-    local function emitSection(tasks, maxLines, fmt)
+    local emitSection = function(tasks, maxLines, fmt)
         local shown = 0
         for _, t in ipairs(tasks) do
             if shown >= maxLines then
-                addRow(string.format("(+%d weitere)", #tasks - shown),
+                addRow(self:t("myTodos_hud_more", #tasks - shown),
                     MyTodos.HUD_DIM_COLOR, false)
                 return
             end
@@ -409,24 +475,26 @@ function MyTodos:drawHud()
     if not hasField and not hasHusb then
         local s
         if fieldOwned == 0 and husbOwned == 0 then
-            s = "(keine eigenen Felder/Tiere)"
+            s = self:t("myTodos_hud_no_owned")
         else
-            s = "(nichts zu tun)"
+            s = self:t("myTodos_hud_nothing_to_do")
         end
         addRow(s, MyTodos.HUD_DIM_COLOR, false)
     else
         if hasField then
             if showSubHeaders then
-                addRow("── Felder ──", MyTodos.HUD_DIM_COLOR, true)
+                addRow("── " .. self:t("myTodos_section_fields") .. " ──",
+                    MyTodos.HUD_DIM_COLOR, true)
             end
             emitSection(fTasks, MyTodos.HUD_MAX_FIELD_LINES, function(t)
-                return string.format("F%s  %s", tostring(t.fieldId), t.task)
+                return self:t("myTodos_hud_field_row", tostring(t.fieldId), t.task)
             end)
         end
 
         if hasHusb then
             if showSubHeaders then
-                addRow("── Tiere ──", MyTodos.HUD_DIM_COLOR, true)
+                addRow("── " .. self:t("myTodos_section_animals") .. " ──",
+                    MyTodos.HUD_DIM_COLOR, true)
             end
             emitSection(hTasks, MyTodos.HUD_MAX_HUSB_LINES, function(t)
                 return t.task
@@ -474,30 +542,31 @@ end
 
 function MyTodos:_settingRowText(def)
     local typ = def.type or "bool"
+    local label = self:t(def.labelKey)
     if typ == "bool" then
         local mark = self.settings[def.key] and "[X]" or "[ ]"
-        return string.format("%s  %s", mark, def.label)
+        return string.format("%s  %s", mark, label)
     elseif typ == "percent" then
         local v = self.settings[def.key] or def.default or MyTodos.PERCENT_MIN
-        return string.format("[ %d%% ]  %s", v, def.label)
+        return string.format("[ %d%% ]  %s", v, label)
     end
-    return def.label
+    return label
 end
 
 -- Baut die Render-Liste fuer das Settings-Panel. Group-Wechsel wird in
 -- eine Sub-Header-Zeile uebersetzt; sonst pro Setting eine Click-Zeile.
 function MyTodos:_buildSettingRows()
     local rows = {}
-    local lastGroup = nil
+    local lastGroupKey = nil
     for _, def in ipairs(MyTodos.SETTING_DEFS) do
-        if def.group ~= lastGroup then
-            if def.group ~= nil then
+        if def.groupKey ~= lastGroupKey then
+            if def.groupKey ~= nil then
                 table.insert(rows, {
                     isHeader = true,
-                    text = "── " .. def.group .. " ──",
+                    text = "── " .. self:t(def.groupKey) .. " ──",
                 })
             end
-            lastGroup = def.group
+            lastGroupKey = def.groupKey
         end
         table.insert(rows, {
             key = def.key,
@@ -515,7 +584,7 @@ function MyTodos:drawSettingsContent()
     local padX = MyTodos.SETTINGS_PAD_X
     local padY = MyTodos.SETTINGS_PAD_Y
 
-    local titleText = "MyTodos - Einstellungen"
+    local titleText = self:t("myTodos_settings_title")
     setTextBold(true)
     local maxW = getTextWidth(titleSize, titleText)
     setTextBold(false)
@@ -524,7 +593,7 @@ function MyTodos:drawSettingsContent()
     for _, row in ipairs(rowTexts) do
         maxW = math.max(maxW, getTextWidth(size, row.text))
     end
-    local closeText = "[ Schliessen ]"
+    local closeText = "[ " .. self:t("myTodos_settings_close") .. " ]"
     maxW = math.max(maxW, getTextWidth(size, closeText))
 
     local panelW = math.max(MyTodos.SETTINGS_MIN_WIDTH, maxW + 2 * padX)

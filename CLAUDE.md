@@ -32,6 +32,56 @@ Das Tool ist eine **Erinnerungs-Liste für erfahrene Spieler**, keine Schritt-f�
 
 **File-Split-Konvention**: alle Files erweitern dieselbe `MyTodos`-Tabelle via `function MyTodos:foo()`. Die Tabelle wird in `MyTodos.lua` als `MyTodos = {}` initialisiert — alle anderen Files müssen in `modDesc.xml` danach gelistet sein. Console-Commands haben Callback-Method-Namen als String, die werden erst zur Aufrufzeit aufgelöst, daher Reihenfolge dort egal.
 
+## Lokalisierung (l10n)
+
+Alle Spieler-sichtbaren Strings (HUD + Settings-Dialog) gehen ueber FS25s
+`g_i18n`. Dev-/Log-Output (`Logging.info`, Console-Commands) bleibt
+englisch.
+
+- Sprachdateien: `l10n/l10n_<lang>.xml` (`de`, `en`). Registriert in
+  `modDesc.xml` via `<l10n filenamePrefix="l10n/l10n"/>` -- Engine
+  haengt automatisch `_<lang>.xml` an je nach Spielsprache. Fallback
+  pro Datei (nicht pro Key!) ist `en` -- fehlt ein Key in der aktiven
+  Datei, sieht der Spieler den Key-String roh. Darum beide Files immer
+  zusammen pflegen.
+- Neue Sprache hinzufuegen: `l10n/l10n_<code>.xml` mit den gleichen
+  `<text name="..."/>`-Keys daneben legen, fertig. Kein Code-Change.
+- Helper: `MyTodos:t(key, ...)` in `MyTodos.lua`. Wrappt
+  `g_i18n:getText` + optional `string.format`. Fallback wenn `g_i18n`
+  noch nicht da ist (sehr fruehe Lifecycle-Punkte): gibt den Key
+  zurueck statt zu crashen.
+- Key-Naming: `myTodos_<bereich>_<name>`. Bereiche aktuell:
+  `hud_`, `section_`, `settings_`, `group_`, `setting_<settingsKey>`,
+  `task_`, `fruit_`, `weed_`, `pf_`, `windrow_`, `husb_`.
+- Format-Strings werden mit-uebersetzt (nicht in Lua eingebaut). Z.B.
+  `myTodos_fruit_growing = "%s: Wächst (%s/%s)"` -- so kann ein
+  EN-Translator `"%s: Growing (%s/%s)"` schreiben oder umordnen.
+- `SETTING_DEFS` in `MyTodos.lua` und `WINDROW_TYPES` in
+  `MyTodosFields.lua` halten Keys (`labelKey`, `groupKey`), nicht Text.
+  Werden zur Render-/Sampler-Init-Zeit aufgeloest (Spielsprache kann
+  im laufenden Spiel nicht wechseln, also reicht einmal aufloesen beim
+  Sampler-Init fuer Windrows).
+- Self-Check: `MyTodos.L10N_KEYS` listet ALLE verwendeten Keys als
+  Single source of truth. `MyTodos:checkL10n()` laeuft in
+  `onMapLoaded` nach `loadSettings` und schreibt eine sammelnde
+  Warning ins Log wenn Keys in der aktiven Sprachdatei fehlen
+  (`g_i18n:hasText`). Schweigt wenn alles passt. Bei jedem neuen Key
+  zum Code daher BEIDE Sprachdateien UND `L10N_KEYS` updaten -- der
+  Check faengt vergessene Eintraege.
+- Bewusst NICHT lokalisiert: `Logging.info`/`Logging.warning`-Strings
+  (devs-facing), Console-Command-Returns, Code-Kommentare. Frucht-,
+  FillType- und Bodennamen kommen ohnehin lokalisiert ueber Giants'
+  eigenes i18n (`g_fillTypeManager`, `soilMap.soilTypes`, `fruitName`-
+  Helper im Field-File).
+- **Action-Bindings:** pro `<action>` in `modDesc.xml` erwartet die
+  Engine einen l10n-Key `input_<ACTION_NAME>` -- wird im Keybinding-
+  Menue ("Einstellungen -> Eingabe") angezeigt. Fehlt der Key, sieht
+  der Spieler den rohen Action-Namen UND es kommt eine
+  `Warning: Missing l10n 'input_...'`-Zeile im Log. Aktuell:
+  `input_MYTODOS_TOGGLE_SETTINGS` und `input_MYTODOS_TOGGLE_HUD`.
+  Diese Keys gehoeren NICHT in `MyTodos.L10N_KEYS` -- die Engine
+  validiert sie selbst.
+
 ## Hooks
 
 - `Mission00.load` → `onMissionLoaded` (server/client flags)
@@ -458,6 +508,26 @@ Discovery + Task-Derivation live (10. Mai 2026). HUD zeigt eine zweite Sektion "
 3. **Düngen-Lockout-Persistence**: optional, nice-to-have.
 4. **`weedFactor`-Schwelle**: User hat angemerkt dass `Unkraut` ohne Prozent (weedState=1, weedFactor=0) ggf. nervt — Trigger könnte auf `weedFactor > 0` oder kleine Schwelle geschärft werden.
 5. **PF-Detection**: aktuell wird nach `g_precisionFarming` und ein paar Mod-Namen geguckt — falls `mtRescan` "precision farming: no" ausgibt obwohl PF läuft, in `detectPrecisionFarming()` den korrekten Mod-Folder-Namen ergänzen.
+
+## Stand 13. Mai 2026 (Lokalisierung)
+
+- **Alle Spieler-sichtbaren Strings ueber `g_i18n`** (siehe Sektion
+  "Lokalisierung (l10n)" oben). `l10n/l10n_de.xml` + `l10n/l10n_en.xml`
+  decken HUD-Title, Section-Header, Settings-Dialog, alle Vanilla-Task-
+  Labels (Pflugen/Saen/Grubbern/Walzen/Mulchen/Kalken/Steine/Duengen),
+  Frucht-Lifecycle, Unkraut-Stufen, PF-Labels (Kalk/N) + Suffix-Tags
+  ("stark sauer"/"N-Mangel"), Schwadlade-Aufnehmen-Tasks, alle
+  Husbandry-Prozent-Labels und Pallet-Suffixe ab.
+- **`MyTodos:t(key, ...)`-Helper** als zentraler Aufrufpunkt (mit
+  string.format-Forward). `MyTodos.L10N_KEYS` als Single Source of
+  Truth + `MyTodos:checkL10n()` in `onMapLoaded` warnt bei vergessenen
+  Keys.
+- **`SETTING_DEFS` benutzt jetzt `labelKey`/`groupKey`** statt `label`/
+  `group`. **`WINDROW_TYPES` benutzt `labelKey`** -- wird in
+  `initWindrowSampler` einmalig aufgeloest und im Sampler-Result-Set
+  gecached.
+- **Console-Output bleibt englisch** (Logging + Console-Command-Returns
+  + Probes -- alles devs-facing).
 
 ## Stand 11. Mai 2026 (Precision Farming Phase 1+2)
 
