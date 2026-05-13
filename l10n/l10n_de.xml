@@ -42,7 +42,7 @@
         <text name="myTodos_fruit_withered"         text="%s: Verwelkt"/>
         <text name="myTodos_fruit_cut"              text="%s: gemäht"/>
         <text name="myTodos_fruit_harvest"          text="%s: Ernten"/>
-        <text name="myTodos_fruit_forage"           text="%s: Forage"/>
+        <text name="myTodos_fruit_forage"           text="%s: Siliergut"/>
         <text name="myTodos_fruit_growing"          text="%s: Wächst (%s/%s)"/>
         <text name="myTodos_fruit_regrowing"        text="%s: Wächst nach"/>
         <text name="myTodos_fruit_with_label"       text="%s: %s"/>
