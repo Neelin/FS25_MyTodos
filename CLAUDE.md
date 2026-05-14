@@ -25,7 +25,7 @@ Nützliche Such-Einstiege:
 - `Ignorierte Felder ignoredFieldsAllSaves savegameIndex`
 - `HUD-Anker InputHelpDisplay getHudMetrics`
 - `Task-Derivation derivePrimaryVanilla cutStates Forage`
-- `Settings UI refactor MessageDialog FarmlandOverview` — offener Plan
+- `Settings TabbedMenu Courseplay fs25_settingsTitle` — GUI-Architektur
 - `Helden Feld 29 wheat WHEAT aggregate empty` — Map-Edge-Case
 - `HUD hide dialog _isAnyGuiOpen` — warum draw() drei Layer prüft
 - `TODO-Snapshot` — aktuelle offene Punkte
@@ -57,10 +57,11 @@ wird — sie wollen nur den Überblick *was jetzt ansteht*. Daraus folgt:
   pH, N, Soil), Düngen-Lockout-History
 - `scripts/MyTodosHusbandry.lua` — Tier-Discovery + Task-Derivation
 - `scripts/MyTodosCommands.lua` — alle `mt*`-Konsolenbefehle
-- `scripts/MyTodosSettingsScreen.lua` + `config/MyTodosSettingsScreen.xml`
-  — minimaler ScreenElement für das Settings-Menü (entkoppelt Maus von
-  Kamera wie ESC). **Ist auf der TODO-Liste umzubauen auf
-  `MessageDialog`-basierten FS25-Native-Style**, siehe mempalace-Drawer.
+- `scripts/gui/` + `config/gui/` — Settings-Menü als vollwertiges
+  TabbedMenu im Stil des FS25-ESC-Menüs (3 Tabs: Allgemein, Tiere,
+  Felder). Architektur orientiert an Courseplay's CpInGameMenu, Details
+  im mempalace-Drawer. Alt+M publiziert `GUI_MYTODOS_OPEN` an den
+  MessageCenter, der Subscriber öffnet den Screen.
 - `l10n/l10n_<lang>.xml` — DE, EN, FR, IT
 - Settings: `<UserProfileApp>/modSettings/MyTodos.xml` (Toggles +
   Schwellwerte + Ignore-Liste pro Save+FarmId)
