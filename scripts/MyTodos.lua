@@ -503,9 +503,34 @@ end
 
 -- HUD draw ----------------------------------------------------------
 
+-- True wenn irgendein Menue/Dialog/Pause-Screen offen ist und wir dem HUD
+-- den Weg frei machen sollten. Drei Layer:
+--   1. g_gui.currentGui != nil -- ein voller Screen (showGui-Style) ist
+--      aktiv, z.B. unser eigenes Settings-Menue oder das ESC-Pausemenue.
+--   2. Giants' eigene "ist ein Dialog ueber den Screen gelegt"-API, falls
+--      verfuegbar -- catches showDialog-Style (z.B. FarmlandOverview).
+--   3. Fallback: Mauszeiger sichtbar = mit hoher Wahrscheinlichkeit ist
+--      irgendein interaktives Menue offen. In normalem Gameplay (ohne
+--      Menue) versteckt FS25 den Cursor.
+function MyTodos:_isAnyGuiOpen()
+    if g_gui ~= nil then
+        if g_gui.currentGui ~= nil then return true end
+        if type(g_gui.getIsDialogVisible) == "function" then
+            local ok, visible = pcall(g_gui.getIsDialogVisible, g_gui)
+            if ok and visible then return true end
+        end
+    end
+    if g_inputBinding ~= nil
+            and type(g_inputBinding.getShowMouseCursor) == "function" then
+        local ok, shown = pcall(g_inputBinding.getShowMouseCursor, g_inputBinding)
+        if ok and shown then return true end
+    end
+    return false
+end
+
 function MyTodos:draw()
     if not self.isClient then return end
-    if g_gui ~= nil and g_gui.currentGui ~= nil then return end
+    if self:_isAnyGuiOpen() then return end
     if self.fieldTasks == nil then return end
     if self.settings.hudVisible == false then return end
 
