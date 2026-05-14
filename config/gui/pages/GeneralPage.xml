@@ -36,7 +36,7 @@
         <Bitmap profile="fs25_multiTextOptionContainer" id="booleanPrefab" focusFallthrough="true">
             <BinaryOption profile="fs25_settingsBinaryOption" name="setting" namedComponents="true">
                 <Text profile="fs25_multiTextOptionTooltip" name="tooltip" />
-                <Text profile="fs25_settingsMultiTextOptionTitle" name="label" />
+                <Text profile="myTodos_settingsTitle" name="label" />
             </BinaryOption>
         </Bitmap>
         <Text profile="fs25_settingsSectionHeader" name="sectionHeader" id="sectionHeaderPrefab" />
@@ -44,7 +44,7 @@
             <MultiTextOption profile="fs25_settingsMultiTextOption" name="setting" namedComponents="true"
                              hideButtonOnLimitReached="False">
                 <Text profile="fs25_multiTextOptionTooltip" name="tooltip" />
-                <Text profile="fs25_settingsMultiTextOptionTitle" name="label" />
+                <Text profile="myTodos_settingsTitle" name="label" />
             </MultiTextOption>
         </Bitmap>
     </GuiElement>

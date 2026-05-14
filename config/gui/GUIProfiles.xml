@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!--
+    Custom-Profile fuer das MyTodos-Settings-Menue. Wird von MyTodos in
+    setupGui() geladen via g_gui:loadProfiles() -- muss VOR dem Laden
+    der Page-XMLs passieren (Profile werden beim XML-Parse aufgeloest).
+
+    myTodos_settingsTitle: das Default-fs25_settingsMultiTextOptionTitle
+    setzt den Label-Text genau ueber den Toggle-Button (sieht aus wie
+    eine Ueberschreibung). Wir verschieben ihn 500px nach links, damit
+    Label links und Toggle rechts erscheinen -- analog Courseplay's
+    cpSettingsMultiOptionTitle.
+-->
+<GUIProfiles>
+    <Profile name="myTodos_settingsTitle" extends="fs25_settingsMultiTextOptionTitle">
+        <position value="-500px 0px" />
+    </Profile>
+</GUIProfiles>

@@ -197,6 +197,9 @@ function MyTodos:setupGui()
     if g_gui.guis ~= nil and g_gui.guis.MyTodosSettingsMenu ~= nil then
         return
     end
+    -- Custom-Profile MUESSEN vor loadGui geladen werden, damit die
+    -- XML-Files sie auflösen koennen.
+    g_gui:loadProfiles(MyTodos.MOD_DIR .. "config/gui/GUIProfiles.xml")
     MyTodosSettingsMenu.setupGui()
     Logging.info("[MyTodos] settings menu registered")
 end
