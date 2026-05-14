@@ -25,3 +25,7 @@ desktop.ini
 
 # Interne Arbeits-Liste (zwischen Tobias + Claude), nicht fuer Repo-Konsum
 TODO.md
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
