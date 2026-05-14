@@ -41,48 +41,39 @@ MyTodos.HUD_MIN_WIDTH = 0.16
 MyTodos.HUD_MAX_FIELD_LINES = 14
 MyTodos.HUD_MAX_HUSB_LINES = 8
 
-MyTodos.SETTINGS_X = 0.5
-MyTodos.SETTINGS_Y = 0.7
-MyTodos.SETTINGS_TEXT_SIZE = 0.014
-MyTodos.SETTINGS_TITLE_SIZE = 0.016
-MyTodos.SETTINGS_LINE_SPACING = 1.6
-MyTodos.SETTINGS_PAD_X = 0.018
-MyTodos.SETTINGS_PAD_Y = 0.008
-MyTodos.SETTINGS_MIN_WIDTH = 0.22
-
 MyTodos.HUD_BG_COLOR        = { 0,    0,    0,    0.75 }
 MyTodos.HUD_HEADER_COLOR    = { 0.20, 0.40, 0.05, 0.95 }
 MyTodos.HUD_TEXT_COLOR      = { 1,    1,    1,    1 }
 MyTodos.HUD_DIM_COLOR       = { 0.78, 0.78, 0.78, 1 }
 MyTodos.HUD_HEADER_TEXT     = { 1,    1,    1,    1 }
-MyTodos.HUD_EDIT_COLOR      = { 1.0,  0.85, 0.25, 1 }
 
 MyTodos.SETTINGS_FILENAME = "MyTodos.xml"
 
--- Settings catalog. type ∈ {"bool", "percent"}. percent zyklisiert
--- 5..95 in 5%-Schritten beim Klick (wrap-around). group setzt eine
--- visuelle Sub-Header in den Settings-Dialog.
+-- Settings catalog. type ∈ {"bool", "percent"}. percent rendert als
+-- MultiTextOption mit 5..95 in 5%-Schritten.
 MyTodos.PERCENT_STEP = 5
 MyTodos.PERCENT_MIN = 5
 MyTodos.PERCENT_MAX = 95
 
--- labelKey / groupKey sind l10n-Keys (aus l10n/l10n_<lang>.xml).
--- Werden zur Render-Zeit ueber MyTodos:t() aufgeloest.
+-- labelKey ist ein l10n-Key (aus l10n/l10n_<lang>.xml).
+-- page bestimmt in welchem Tab die Option im Settings-Menue erscheint
+-- ("general", "husbandry"). Felder-Tab wird dynamisch aus eigenen Feldern
+-- gebaut, nicht aus SETTING_DEFS.
 MyTodos.SETTING_DEFS = {
     -- hudVisible kann auch via Tastenkombi (Default: RShift+T, Action
     -- MYTODOS_TOGGLE_HUD) umgeschaltet werden. Hier als Fallback im
-    -- Settings-Dialog, falls die Tastenbelegung vergessen wurde.
-    { key = "hudVisible",  labelKey = "myTodos_setting_hudVisible",  type = "bool",    default = true },
+    -- Settings-Menue, falls die Tastenbelegung vergessen wurde.
+    { key = "hudVisible",  labelKey = "myTodos_setting_hudVisible",  type = "bool",    default = true, page = "general" },
     -- Schwellwerte: Trigger wenn Wert unter/ueber dieser Marke ist.
     -- "Futter unter 20%" heisst: Task erscheint sobald Trog unter 20% voll.
     -- "Mist ueber 80%" heisst: Task erscheint sobald Lager ueber 80% voll.
-    { key = "foodThreshold",         labelKey = "myTodos_setting_foodThreshold",         type = "percent", default = 20, groupKey = "myTodos_group_animals" },
-    { key = "waterThreshold",        labelKey = "myTodos_setting_waterThreshold",        type = "percent", default = 20, groupKey = "myTodos_group_animals" },
-    { key = "strawThreshold",        labelKey = "myTodos_setting_strawThreshold",        type = "percent", default = 20, groupKey = "myTodos_group_animals" },
-    { key = "meadowThreshold",       labelKey = "myTodos_setting_meadowThreshold",       type = "percent", default = 20, groupKey = "myTodos_group_animals" },
-    { key = "manureThreshold",       labelKey = "myTodos_setting_manureThreshold",       type = "percent", default = 80, groupKey = "myTodos_group_animals" },
-    { key = "liquidManureThreshold", labelKey = "myTodos_setting_liquidManureThreshold", type = "percent", default = 80, groupKey = "myTodos_group_animals" },
-    { key = "milkThreshold",         labelKey = "myTodos_setting_milkThreshold",         type = "percent", default = 80, groupKey = "myTodos_group_animals" },
+    { key = "foodThreshold",         labelKey = "myTodos_setting_foodThreshold",         type = "percent", default = 20, page = "husbandry" },
+    { key = "waterThreshold",        labelKey = "myTodos_setting_waterThreshold",        type = "percent", default = 20, page = "husbandry" },
+    { key = "strawThreshold",        labelKey = "myTodos_setting_strawThreshold",        type = "percent", default = 20, page = "husbandry" },
+    { key = "meadowThreshold",       labelKey = "myTodos_setting_meadowThreshold",       type = "percent", default = 20, page = "husbandry" },
+    { key = "manureThreshold",       labelKey = "myTodos_setting_manureThreshold",       type = "percent", default = 80, page = "husbandry" },
+    { key = "liquidManureThreshold", labelKey = "myTodos_setting_liquidManureThreshold", type = "percent", default = 80, page = "husbandry" },
+    { key = "milkThreshold",         labelKey = "myTodos_setting_milkThreshold",         type = "percent", default = 80, page = "husbandry" },
 }
 
 -- l10n-Helper: zieht einen Text aus l10n/l10n_<lang>.xml und applied
@@ -107,13 +98,12 @@ MyTodos.L10N_KEYS = {
     "myTodos_hud_title", "myTodos_hud_no_owned", "myTodos_hud_nothing_to_do",
     "myTodos_hud_more", "myTodos_hud_field_row",
     "myTodos_section_fields", "myTodos_section_animals",
-    "myTodos_settings_title", "myTodos_settings_close",
-    "myTodos_group_animals",
+    "myTodos_page_general", "myTodos_page_husbandry", "myTodos_page_fields",
     "myTodos_setting_hudVisible", "myTodos_setting_foodThreshold",
     "myTodos_setting_waterThreshold", "myTodos_setting_strawThreshold",
     "myTodos_setting_meadowThreshold", "myTodos_setting_manureThreshold",
     "myTodos_setting_liquidManureThreshold", "myTodos_setting_milkThreshold",
-    "myTodos_group_ignored_fields", "myTodos_settings_field_label",
+    "myTodos_settings_field_label",
     "myTodos_task_plow", "myTodos_task_seed", "myTodos_task_cultivate",
     "myTodos_task_roll", "myTodos_task_mulch", "myTodos_task_lime",
     "myTodos_task_stones", "myTodos_task_fertilize",
@@ -200,17 +190,15 @@ function MyTodos:onMapLoaded()
 end
 
 function MyTodos:setupGui()
-    if g_gui == nil or MyTodosSettingsScreen == nil then
-        Logging.warning("[MyTodos] cannot setup GUI: g_gui or MyTodosSettingsScreen missing")
+    if g_gui == nil or MyTodosSettingsMenu == nil then
+        Logging.warning("[MyTodos] cannot setup GUI: g_gui or MyTodosSettingsMenu missing")
         return
     end
-    if g_gui.guis ~= nil and g_gui.guis.MyTodosSettingsScreen ~= nil then
+    if g_gui.guis ~= nil and g_gui.guis.MyTodosSettingsMenu ~= nil then
         return
     end
-    local xmlPath = MyTodos.MOD_DIR .. "config/MyTodosSettingsScreen.xml"
-    local screen = MyTodosSettingsScreen.new()
-    g_gui:loadGui(xmlPath, "MyTodosSettingsScreen", screen)
-    Logging.info("[MyTodos] settings GUI loaded from %s", xmlPath)
+    MyTodosSettingsMenu.setupGui()
+    Logging.info("[MyTodos] settings menu registered")
 end
 
 -- Update / scan -----------------------------------------------------
@@ -322,10 +310,19 @@ end
 
 function MyTodos:onActionToggleSettings()
     if g_gui == nil then return end
-    if g_gui.currentGuiName == "MyTodosSettingsScreen" then
+    -- Wenn das Menue gerade aktiv ist -> zumachen, sonst auf-event publishen.
+    -- Subscriber in MyTodosSettingsMenu ruft dann g_gui:showGui auf.
+    if g_gui.currentGuiName == "MyTodosSettingsMenu" then
         g_gui:showGui("")
-    elseif g_gui.currentGui == nil then
-        g_gui:showGui("MyTodosSettingsScreen")
+        return
+    end
+    if g_gui.currentGui ~= nil then
+        -- Ein anderes Menue ist offen (z.B. ESC, Shop) -- Alt+M dort ignorieren
+        -- damit man sich keinen Stack baut.
+        return
+    end
+    if g_messageCenter ~= nil and MessageType.GUI_MYTODOS_OPEN ~= nil then
+        g_messageCenter:publishDelayed(MessageType.GUI_MYTODOS_OPEN)
     end
 end
 
@@ -348,26 +345,6 @@ function MyTodos:setSetting(key, value)
     self:saveSettings()
     self:updateMouseCursor()
     Logging.info("[MyTodos] setting %s = %s", key, tostring(value))
-end
-
-function MyTodos:_settingDef(key)
-    for _, def in ipairs(MyTodos.SETTING_DEFS) do
-        if def.key == key then return def end
-    end
-    return nil
-end
-
-function MyTodos:toggleSetting(key)
-    self:setSetting(key, not self.settings[key])
-end
-
-function MyTodos:cyclePercentSetting(key)
-    local def = self:_settingDef(key)
-    if def == nil then return end
-    local cur = self.settings[key] or def.default or MyTodos.PERCENT_MIN
-    local nxt = cur + MyTodos.PERCENT_STEP
-    if nxt > MyTodos.PERCENT_MAX then nxt = MyTodos.PERCENT_MIN end
-    self:setSetting(key, nxt)
 end
 
 -- Ignorierte Felder ------------------------------------------------
@@ -645,188 +622,6 @@ function MyTodos:drawHud()
     setTextAlignment(RenderText.ALIGN_LEFT)
     setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_BASELINE)
     setTextColor(1, 1, 1, 1)
-end
-
-function MyTodos:_settingRowText(def)
-    local typ = def.type or "bool"
-    local label = self:t(def.labelKey)
-    if typ == "bool" then
-        local mark = self.settings[def.key] and "[X]" or "[ ]"
-        return string.format("%s  %s", mark, label)
-    elseif typ == "percent" then
-        local v = self.settings[def.key] or def.default or MyTodos.PERCENT_MIN
-        return string.format("[ %d%% ]  %s", v, label)
-    end
-    return label
-end
-
--- Baut die Render-Liste fuer das Settings-Panel. Group-Wechsel wird in
--- eine Sub-Header-Zeile uebersetzt; sonst pro Setting eine Click-Zeile.
--- Am Ende dynamisch: pro eigenes Feld eine Ignorier-Toggle-Zeile.
-function MyTodos:_buildSettingRows()
-    local rows = {}
-    local lastGroupKey = nil
-    for _, def in ipairs(MyTodos.SETTING_DEFS) do
-        if def.groupKey ~= lastGroupKey then
-            if def.groupKey ~= nil then
-                table.insert(rows, {
-                    isHeader = true,
-                    text = "── " .. self:t(def.groupKey) .. " ──",
-                })
-            end
-            lastGroupKey = def.groupKey
-        end
-        table.insert(rows, {
-            key = def.key,
-            type = def.type or "bool",
-            text = self:_settingRowText(def),
-        })
-    end
-
-    -- Dynamische Ignorier-Felder-Sektion. Listet ALLE eigenen Felder
-    -- mit ihrem Toggle-State; Klick flippt den State direkt.
-    if self.farmId ~= nil then
-        local owned = self:collectOwnedFields(self.farmId)
-        if #owned > 0 then
-            table.sort(owned, function(a, b)
-                local an, bn = tonumber(a.fieldId), tonumber(b.fieldId)
-                if an ~= nil and bn ~= nil then return an < bn end
-                return tostring(a.fieldId) < tostring(b.fieldId)
-            end)
-            table.insert(rows, {
-                isHeader = true,
-                text = "── " .. self:t("myTodos_group_ignored_fields") .. " ──",
-            })
-            for _, entry in ipairs(owned) do
-                local ignored = self:isFieldIgnored(entry.fieldId)
-                local mark = ignored and "[X]" or "[ ]"
-                local label = self:t("myTodos_settings_field_label",
-                    tostring(entry.fieldId))
-                table.insert(rows, {
-                    isIgnoreField = true,
-                    fieldId = entry.fieldId,
-                    text = string.format("%s  %s", mark, label),
-                })
-            end
-        end
-    end
-
-    return rows
-end
-
-function MyTodos:drawSettingsContent()
-    local size = MyTodos.SETTINGS_TEXT_SIZE
-    local titleSize = MyTodos.SETTINGS_TITLE_SIZE
-    local lineH = size * MyTodos.SETTINGS_LINE_SPACING
-    local padX = MyTodos.SETTINGS_PAD_X
-    local padY = MyTodos.SETTINGS_PAD_Y
-
-    local titleText = self:t("myTodos_settings_title")
-    setTextBold(true)
-    local maxW = getTextWidth(titleSize, titleText)
-    setTextBold(false)
-
-    local rowTexts = self:_buildSettingRows()
-    for _, row in ipairs(rowTexts) do
-        maxW = math.max(maxW, getTextWidth(size, row.text))
-    end
-    local closeText = "[ " .. self:t("myTodos_settings_close") .. " ]"
-    maxW = math.max(maxW, getTextWidth(size, closeText))
-
-    local panelW = math.max(MyTodos.SETTINGS_MIN_WIDTH, maxW + 2 * padX)
-    local headerH = titleSize + 2 * padY
-    local closeRowH = lineH
-    local bodyH = padY + #rowTexts * lineH + padY + closeRowH + padY
-    local totalH = headerH + bodyH
-
-    local panelLeft = MyTodos.SETTINGS_X - panelW / 2
-    local panelTop = MyTodos.SETTINGS_Y
-    local panelBottom = panelTop - totalH
-
-    self:drawPanel(panelLeft, panelTop - headerH, panelW, headerH, MyTodos.HUD_HEADER_COLOR)
-    self:drawPanel(panelLeft, panelBottom, panelW, bodyH, MyTodos.HUD_BG_COLOR)
-
-    setTextAlignment(RenderText.ALIGN_CENTER)
-    setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_TOP)
-
-    setTextBold(true)
-    setTextColor(MyTodos.HUD_HEADER_TEXT[1], MyTodos.HUD_HEADER_TEXT[2],
-                 MyTodos.HUD_HEADER_TEXT[3], MyTodos.HUD_HEADER_TEXT[4])
-    renderText(MyTodos.SETTINGS_X, panelTop - padY, titleSize, titleText)
-    setTextBold(false)
-
-    local y = panelTop - headerH - padY
-    local rowBounds = {}
-    local textLeft = panelLeft + padX
-    for _, row in ipairs(rowTexts) do
-        if row.isHeader then
-            setTextAlignment(RenderText.ALIGN_CENTER)
-            setTextBold(true)
-            setTextColor(MyTodos.HUD_DIM_COLOR[1], MyTodos.HUD_DIM_COLOR[2],
-                         MyTodos.HUD_DIM_COLOR[3], MyTodos.HUD_DIM_COLOR[4])
-            renderText(MyTodos.SETTINGS_X, y, size, row.text)
-            setTextBold(false)
-        else
-            setTextAlignment(RenderText.ALIGN_LEFT)
-            setTextColor(MyTodos.HUD_TEXT_COLOR[1], MyTodos.HUD_TEXT_COLOR[2],
-                         MyTodos.HUD_TEXT_COLOR[3], MyTodos.HUD_TEXT_COLOR[4])
-            renderText(textLeft, y, size, row.text)
-            table.insert(rowBounds, {
-                key = row.key,
-                type = row.type,
-                isIgnoreField = row.isIgnoreField,
-                fieldId = row.fieldId,
-                left = panelLeft,
-                bottom = y - lineH,
-                width = panelW,
-                height = lineH,
-            })
-        end
-        y = y - lineH
-    end
-
-    -- Schliessen-Button unten zentriert
-    setTextAlignment(RenderText.ALIGN_CENTER)
-    setTextColor(MyTodos.HUD_EDIT_COLOR[1], MyTodos.HUD_EDIT_COLOR[2],
-                 MyTodos.HUD_EDIT_COLOR[3], MyTodos.HUD_EDIT_COLOR[4])
-    y = y - padY
-    renderText(MyTodos.SETTINGS_X, y, size, closeText)
-    table.insert(rowBounds, {
-        key = "__close__",
-        left = panelLeft,
-        bottom = y - lineH,
-        width = panelW,
-        height = lineH,
-    })
-
-    self.settingsRowBounds = rowBounds
-
-    setTextAlignment(RenderText.ALIGN_LEFT)
-    setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_BASELINE)
-    setTextColor(1, 1, 1, 1)
-end
-
-function MyTodos:handleSettingsClick(posX, posY)
-    local rows = self.settingsRowBounds
-    if rows == nil then return false end
-    for _, row in ipairs(rows) do
-        if posX >= row.left and posX <= row.left + row.width
-                and posY >= row.bottom and posY <= row.bottom + row.height then
-            if row.key == "__close__" then
-                if g_gui ~= nil and g_gui.showGui ~= nil then
-                    g_gui:showGui("")
-                end
-            elseif row.isIgnoreField then
-                self:toggleFieldIgnored(row.fieldId)
-            elseif row.type == "percent" then
-                self:cyclePercentSetting(row.key)
-            else
-                self:toggleSetting(row.key)
-            end
-            return true
-        end
-    end
-    return false
 end
 
 -- Settings persistence ----------------------------------------------

@@ -14,10 +14,10 @@
         <text name="myTodos_section_fields"         text="Felder"/>
         <text name="myTodos_section_animals"        text="Tiere"/>
 
-        <!-- Settings dialog -->
-        <text name="myTodos_settings_title"         text="MyTodos - Einstellungen"/>
-        <text name="myTodos_settings_close"         text="Schliessen"/>
-        <text name="myTodos_group_animals"          text="Tiere"/>
+        <!-- Settings menu -->
+        <text name="myTodos_page_general"           text="Allgemein"/>
+        <text name="myTodos_page_husbandry"         text="Tiere"/>
+        <text name="myTodos_page_fields"            text="Felder"/>
         <text name="myTodos_setting_hudVisible"            text="HUD anzeigen"/>
         <text name="myTodos_setting_foodThreshold"         text="Futter unter"/>
         <text name="myTodos_setting_waterThreshold"        text="Wasser unter"/>
@@ -26,7 +26,6 @@
         <text name="myTodos_setting_manureThreshold"       text="Mist ueber"/>
         <text name="myTodos_setting_liquidManureThreshold" text="Guelle ueber"/>
         <text name="myTodos_setting_milkThreshold"         text="Milch ueber"/>
-        <text name="myTodos_group_ignored_fields"   text="Ignorierte Felder"/>
         <text name="myTodos_settings_field_label"   text="Feld %s"/>
 
         <!-- Task: vanilla -->

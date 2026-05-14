@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<!--
+    Allgemein-Tab. Aufbau analog Courseplay's GlobalSettingsFrame.xml,
+    aber ohne die Sub-Category-Tabs (die wir nicht brauchen) und ohne
+    den Settings-Slider auf der rechten Seite (kommt automatisch via
+    ScrollingLayout's eigener Scroll-Bar).
+
+    Wichtige Elemente:
+      - categoryHeaderText     -> Titel der Page (z.B. "Allgemein")
+      - layout                 -> ScrollingLayout, hier landen alle Rows
+      - booleanPrefab          -> Template fuer einen Boolean-Toggle
+      - multiTextPrefab        -> Template fuer eine Multi-Text-Option
+      - sectionHeaderPrefab    -> Template fuer einen Sub-Header
+      - settingsSlider         -> rechte Scroll-Bar fuer das Layout
+-->
+<GUI name="myTodosPageGeneral">
+    <GuiElement profile="fs25_menuContainer">
+        <GuiElement profile="fs25_menuHeaderPanel">
+            <Bitmap profile="fs25_menuHeaderIconBg">
+                <Bitmap profile="fs25_menuHeaderIcon" id="categoryHeaderIcon" />
+            </Bitmap>
+            <Text profile="fs25_menuHeaderTitle" id="categoryHeaderText" />
+        </GuiElement>
+
+        <ThreePartBitmap profile="fs25_lineSeparatorTopHighlighted" position="0px -57px" />
+
+        <GuiElement profile="fs25_subCategorySelectorTabbedContainer">
+            <ScrollingLayout profile="fs25_settingsLayout" id="layout"
+                             bottomClipperElementName="bottomClipper">
+            </ScrollingLayout>
+            <Bitmap profile="fs25_settingsTooltipSeparator" name="separator" />
+            <Bitmap profile="fs25_stopClipper" name="bottomClipper" />
+        </GuiElement>
+
+        <!-- Prefabs (werden in MyTodosBasePage:initialize unlinked) -->
+        <Bitmap profile="fs25_multiTextOptionContainer" id="booleanPrefab" focusFallthrough="true">
+            <BinaryOption profile="fs25_settingsBinaryOption" name="setting" namedComponents="true">
+                <Text profile="fs25_multiTextOptionTooltip" name="tooltip" />
+                <Text profile="fs25_settingsMultiTextOptionTitle" name="label" />
+            </BinaryOption>
+        </Bitmap>
+        <Text profile="fs25_settingsSectionHeader" name="sectionHeader" id="sectionHeaderPrefab" />
+        <Bitmap profile="fs25_multiTextOptionContainer" id="multiTextPrefab" focusFallthrough="true">
+            <MultiTextOption profile="fs25_settingsMultiTextOption" name="setting" namedComponents="true"
+                             hideButtonOnLimitReached="False">
+                <Text profile="fs25_multiTextOptionTooltip" name="tooltip" />
+                <Text profile="fs25_settingsMultiTextOptionTitle" name="label" />
+            </MultiTextOption>
+        </Bitmap>
+    </GuiElement>
+
+    <ThreePartBitmap profile="fs25_sliderDockedBg" id="settingsSliderBox">
+        <ThreePartBitmap profile="fs25_sliderDockedBox">
+            <Slider profile="fs25_sliderDocked" id="settingsSlider" />
+        </ThreePartBitmap>
+    </ThreePartBitmap>
+
+    <GUIProfiles>
+    </GUIProfiles>
+</GUI>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!--
+    MyTodos main settings menu layout. Strukturell identisch zum Vanilla-
+    InGameMenu (TabbedMenu): Vollbild-Background, oben Header mit Tab-Bar,
+    Mitte ein Paging-Element das die Frame-Pages haelt, unten die Button-
+    Box (Back/Prev/Next).
+
+    Profile-Namen sind alle Vanilla-fs25_*-Profile -- Optik damit
+    identisch zum Spielmenue.
+-->
+<GUI onOpen="onOpen" onClose="onClose" onCreate="onCreate">
+    <Bitmap profile="fs25_fullScreenBackground" id="background" />
+
+    <Paging profile="uiInGameMenuPaging" onPageChange="onPageChange" onPageUpdate="onPageUpdate"
+            id="pagingElement">
+        <FrameReference ref="myTodosPageGeneral"   name="myTodosPageGeneral"   id="pageGeneral" />
+        <FrameReference ref="myTodosPageHusbandry" name="myTodosPageHusbandry" id="pageHusbandry" />
+        <FrameReference ref="myTodosPageFields"    name="myTodosPageFields"    id="pageFields" />
+    </Paging>
+
+    <Bitmap profile="fs25_tabListContainer" id="header">
+        <MultiTextOption profile="uiInGameMenuHeaderSelector" onClick="onClickPageSelection"
+                         id="pageSelector" soundDisabled="true" />
+        <SmoothList profile="fs25_tabList" id="pagingTabList"
+                    onSelectionChanged="onTabMenuSelectionChanged" onScroll="onTabMenuScroll">
+            <ListItem profile="fs25_tabListItem">
+                <Button profile="fs25_tabListItemButton" name="tabButton" soundDisabled="true" />
+                <Bitmap profile="fs25_tabListItemSeparator" />
+                <Bitmap profile="fs25_tabListItemSeparatorBottom" />
+            </ListItem>
+        </SmoothList>
+    </Bitmap>
+
+    <BoxLayout profile="fs25_buttonBox" id="buttonsPanel">
+        <Button profile="buttonBack" onClick="onClickBack" id="menuButton[1]">
+            <Bitmap profile="fs25_buttonBoxSeparator" name="separator" />
+        </Button>
+        <Button profile="buttonBack" onClick="onClickBack" id="menuButton[2]">
+            <Bitmap profile="fs25_buttonBoxSeparator" name="separator" />
+        </Button>
+        <Button profile="buttonBack" onClick="onClickBack" id="menuButton[3]">
+            <Bitmap profile="fs25_buttonBoxSeparator" name="separator" />
+        </Button>
+    </BoxLayout>
+
+    <GUIProfiles>
+    </GUIProfiles>
+</GUI>
