@@ -26,6 +26,8 @@
         <text name="myTodos_setting_manureThreshold"       text="Manure above"/>
         <text name="myTodos_setting_liquidManureThreshold" text="Slurry above"/>
         <text name="myTodos_setting_milkThreshold"         text="Milk above"/>
+        <text name="myTodos_group_ignored_fields"   text="Ignored fields"/>
+        <text name="myTodos_settings_field_label"   text="Field %s"/>
 
         <!-- Task: vanilla -->
         <text name="myTodos_task_plow"              text="Plow"/>

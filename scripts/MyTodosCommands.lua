@@ -38,6 +38,47 @@ function MyTodos:consoleSettingsCmd()
     return string.format("MyTodos settings: %s", tostring(self.settingsOpen))
 end
 
+-- Hilfsfunktion fuer mtIgnore/mtUnignore: nimmt user-input, sucht das Feld,
+-- liefert die kanonische fieldId (number wenn farmland.name numerisch ist,
+-- sonst string -- analog collectOwnedFields).
+function MyTodos:_resolveIgnoreFieldId(arg)
+    local field = self:resolveFieldByUserNumber(arg)
+    if field == nil then return nil end
+    local fname = field.farmland and field.farmland.name
+    if type(fname) == "string" and fname ~= "" then
+        return tonumber(fname) or fname
+    end
+    return tonumber(arg) or tostring(arg)
+end
+
+addConsoleCommand("mtIgnore",
+    "Mark a field as ignored (no tasks in HUD). Usage: mtIgnore <fieldNumber>",
+    "consoleIgnoreCmd", MyTodos)
+function MyTodos:consoleIgnoreCmd(arg)
+    if arg == nil or arg == "" then return "Usage: mtIgnore <fieldNumber>" end
+    if self.farmId == nil then return "MyTodos: not ready (no farmId yet)" end
+    local fid = self:_resolveIgnoreFieldId(arg)
+    if fid == nil then
+        return string.format("Field %s not found", tostring(arg))
+    end
+    self:setFieldIgnored(fid, true)
+    return string.format("MyTodos: field %s ignored", tostring(fid))
+end
+
+addConsoleCommand("mtUnignore",
+    "Un-ignore a field. Usage: mtUnignore <fieldNumber>",
+    "consoleUnignoreCmd", MyTodos)
+function MyTodos:consoleUnignoreCmd(arg)
+    if arg == nil or arg == "" then return "Usage: mtUnignore <fieldNumber>" end
+    if self.farmId == nil then return "MyTodos: not ready (no farmId yet)" end
+    local fid = self:_resolveIgnoreFieldId(arg)
+    if fid == nil then
+        return string.format("Field %s not found", tostring(arg))
+    end
+    self:setFieldIgnored(fid, false)
+    return string.format("MyTodos: field %s un-ignored", tostring(fid))
+end
+
 addConsoleCommand("mtRescan", "Force MyTodos to rescan fields now",
     "consoleRescanCmd", MyTodos)
 function MyTodos:consoleRescanCmd()
@@ -638,6 +679,359 @@ function MyTodos:consoleProbeStonesCmd(arg)
     end
 
     return "Stone probe done - check log"
+end
+
+-- Listet alle field-Instanzen die `farmland.name == <arg>` haben.
+-- Auf modded Maps kann eine User-facing Feldnummer mehreren echten
+-- field-Objekten entsprechen (eine Farmland traegt mehrere Polygons,
+-- oder mehrere Farmlands haben zufaellig den gleichen Namen).
+-- Liefert pro Treffer: FieldManager-Key, farmland.id, fruitTypeIndex,
+-- growthState und Polygon-Punkt-Anzahl -- damit wir sehen welche
+-- Instanz tatsaechlich die Frucht traegt.
+addConsoleCommand("mtFindField",
+    "List all field-instances with a given farmland.name. Usage: mtFindField <fieldNumber>",
+    "consoleFindFieldCmd", MyTodos)
+function MyTodos:consoleFindFieldCmd(arg)
+    if arg == nil or arg == "" then return "Usage: mtFindField <fieldNumber>" end
+    if g_fieldManager == nil then return "g_fieldManager nil" end
+    local target = tostring(arg)
+    local targetNum = tonumber(arg)
+    local matches = 0
+    for key, field in pairs(g_fieldManager:getFields()) do
+        local fname = field.farmland and field.farmland.name
+        local fnameStr = tostring(fname)
+        if fnameStr == target
+                or (targetNum ~= nil and targetNum == tonumber(fnameStr)) then
+            matches = matches + 1
+            local fs = field.fieldState or {}
+            local ownerId = (field.farmland ~= nil and g_farmlandManager ~= nil)
+                and g_farmlandManager:getFarmlandOwner(field.farmland.id) or nil
+            Logging.info("[MyTodos] match for name=%s: fmKey=%s farmland.id=%s owner=%s fruitTypeIndex=%s growthState=%s polygon=%d",
+                target, tostring(key),
+                tostring(field.farmland and field.farmland.id),
+                tostring(ownerId),
+                tostring(fs.fruitTypeIndex),
+                tostring(fs.growthState),
+                (type(field.polygonPoints) == "table") and #field.polygonPoints or -1)
+        end
+    end
+    return string.format("Found %d field-instance(s) with farmland.name=%s",
+        matches, target)
+end
+
+-- Listet alle eigenen Felder mit ihrer tatsaechlichen Frucht und den
+-- wichtigsten fieldState-Werten. Hilft die Engine-Sicht ("welche Frucht
+-- liegt laut Aggregat auf welcher Farmland.name") mit dem Visuellen
+-- abzugleichen. Wenn dein Weizen auf farmland.name=31 zu finden ist,
+-- weisst du dass das "29"-Schild an der falschen Stelle steht.
+addConsoleCommand("mtListOwned",
+    "List all owned fields with their current fruit + state",
+    "consoleListOwnedCmd", MyTodos)
+function MyTodos:consoleListOwnedCmd()
+    if g_fieldManager == nil then return "g_fieldManager nil" end
+    if self.farmId == nil then return "MyTodos: no farmId yet" end
+    Logging.info("[MyTodos] === owned fields with fruit ===")
+    local rows = {}
+    for fmKey, field in pairs(g_fieldManager:getFields()) do
+        local fl = field.farmland
+        if fl ~= nil and g_farmlandManager ~= nil
+                and g_farmlandManager:getFarmlandOwner(fl.id) == self.farmId then
+            local fs = field.fieldState or {}
+            local fruit = "<empty>"
+            if (fs.fruitTypeIndex or 0) > 0 and g_fruitTypeManager ~= nil then
+                local ft = g_fruitTypeManager:getFruitTypeByIndex(fs.fruitTypeIndex)
+                if ft ~= nil then fruit = ft.name end
+            end
+            table.insert(rows, {
+                name = fl.name, fmKey = fmKey, flId = fl.id,
+                fruit = fruit, fs = fs,
+            })
+        end
+    end
+    -- Sortiert nach farmland.name (numerisch wenn moeglich) damit man's
+    -- mit der Map-Sicht abgleichen kann.
+    table.sort(rows, function(a, b)
+        local an, bn = tonumber(a.name), tonumber(b.name)
+        if an ~= nil and bn ~= nil then return an < bn end
+        return tostring(a.name) < tostring(b.name)
+    end)
+    for _, r in ipairs(rows) do
+        Logging.info("[MyTodos] name=%s fmKey=%s farmland.id=%s fruit=%s growth=%s plow=%s spray=%s",
+            tostring(r.name), tostring(r.fmKey), tostring(r.flId),
+            r.fruit, tostring(r.fs.growthState),
+            tostring(r.fs.plowLevel), tostring(r.fs.sprayLevel))
+    end
+    return string.format("Listed %d owned field(s) - check log", #rows)
+end
+
+-- "Was sehe ich hier?": nimmt die Position des controlled-vehicle (oder
+-- des Spielers wenn zu Fuss) und fragt die Engine ab welche Farmland,
+-- welche Field-Polygon-Instanz und welche Frucht an diesem Punkt liegen.
+-- Direktester Weg um Visuelles und Engine-Sicht abzugleichen.
+addConsoleCommand("mtWhereAmI",
+    "Probe farmland / field / fruit at your current world position",
+    "consoleWhereAmICmd", MyTodos)
+function MyTodos:consoleWhereAmICmd()
+    -- Position-Detection in FS25 ist unzuverlaessig -- Giants hat die
+    -- APIs zwischen Versionen umgebaut. Wir probieren mehrere Quellen
+    -- und nehmen den ersten plausiblen Treffer. Bonus: dumpen g_localPlayer
+    -- damit wir bei Problemen direkt sehen welche Felder verfuegbar sind.
+    local cm = g_currentMission
+    local x, y, z, source
+
+    local function trySource(label, getter)
+        if x ~= nil then return end
+        local ok, a, b, c = pcall(getter)
+        if not ok then
+            Logging.info("[MyTodos] pos probe '%s' err: %s", label, tostring(a))
+            return
+        end
+        if type(a) ~= "number" or type(c) ~= "number" then
+            Logging.info("[MyTodos] pos probe '%s' empty (a=%s c=%s)",
+                label, tostring(a), tostring(c))
+            return
+        end
+        -- (0, *, 0) sind sehr wahrscheinlich der "geparkte Player" wenn
+        -- man im Fahrzeug sitzt -- nicht akzeptieren, weiterprobieren.
+        if math.abs(a) < 0.01 and math.abs(c) < 0.01 then
+            Logging.info("[MyTodos] pos probe '%s' skipped (origin-zero: x=%.2f z=%.2f -- player parked while in vehicle?)",
+                label, a, c)
+            return
+        end
+        Logging.info("[MyTodos] pos probe '%s' OK: x=%.2f y=%.2f z=%.2f",
+            label, a, b or 0, c)
+        x, y, z, source = a, b, c, label
+    end
+
+    -- 1. cm.controlledVehicle (legacy)
+    if cm ~= nil and cm.controlledVehicle ~= nil
+            and cm.controlledVehicle.rootNode ~= nil then
+        local v = cm.controlledVehicle
+        trySource("cm.controlledVehicle",
+            function() return getWorldTranslation(v.rootNode) end)
+    end
+    -- 2. g_localPlayer.controlledVehicle (FS25-typisch)
+    if _G.g_localPlayer ~= nil
+            and _G.g_localPlayer.controlledVehicle ~= nil
+            and _G.g_localPlayer.controlledVehicle.rootNode ~= nil then
+        local v = _G.g_localPlayer.controlledVehicle
+        trySource("g_localPlayer.controlledVehicle",
+            function() return getWorldTranslation(v.rootNode) end)
+    end
+    -- 3. Methode cm:getControlledVehicle()
+    if cm ~= nil and type(cm.getControlledVehicle) == "function" then
+        local ok, gv = pcall(cm.getControlledVehicle, cm)
+        if ok and gv ~= nil and gv.rootNode ~= nil then
+            trySource("cm:getControlledVehicle()",
+                function() return getWorldTranslation(gv.rootNode) end)
+        end
+    end
+    -- 4. Scan vehicleSystem.vehicles nach "entered/controlled"-Flag.
+    --    Bekannte Method-Kandidaten in FS25: getIsEntered, getIsControlled.
+    if cm ~= nil and cm.vehicleSystem ~= nil
+            and type(cm.vehicleSystem.vehicles) == "table" then
+        for _, veh in ipairs(cm.vehicleSystem.vehicles) do
+            if veh.rootNode ~= nil then
+                local active = false
+                for _, m in ipairs({"getIsEntered", "getIsControlled"}) do
+                    if type(veh[m]) == "function" then
+                        local ok, r = pcall(veh[m], veh)
+                        if ok and r == true then active = true; break end
+                    end
+                end
+                if not active and veh.isEntered == true then active = true end
+                if not active and veh.isControlled == true then active = true end
+                if active then
+                    local vv = veh
+                    trySource("vehicleSystem entered: " .. tostring(vv.typeName),
+                        function() return getWorldTranslation(vv.rootNode) end)
+                    if x ~= nil then break end
+                end
+            end
+        end
+    end
+    -- 5. g_localPlayer.rootNode -- letzter Fallback. Wenn im Vehicle, ist
+    --    das oft (0, ~-200, 0); der origin-zero-Filter in trySource
+    --    blockiert das, sonst akzeptieren (Spieler zu Fuss).
+    if _G.g_localPlayer ~= nil and _G.g_localPlayer.rootNode ~= nil then
+        local p = _G.g_localPlayer
+        trySource("g_localPlayer.rootNode",
+            function() return getWorldTranslation(p.rootNode) end)
+    end
+
+    if x == nil then
+        Logging.info("[MyTodos] no position source found. Diagnostic dump:")
+        if _G.g_localPlayer ~= nil then
+            self:dumpKeys("g_localPlayer", _G.g_localPlayer)
+        end
+        if cm ~= nil and cm.vehicleSystem ~= nil
+                and type(cm.vehicleSystem.vehicles) == "table" then
+            Logging.info("[MyTodos] vehicleSystem.vehicles: %d entries",
+                #cm.vehicleSystem.vehicles)
+        end
+        return "no position source found -- diagnostic written to log"
+    end
+    Logging.info("[MyTodos] pos (%s): x=%.2f y=%.2f z=%.2f",
+        source, x, y or 0, z)
+
+    -- 1. Farmland-Lookup an der Position
+    if g_farmlandManager ~= nil then
+        local methods = { "getFarmlandIdAtWorldPosition", "getFarmlandAtWorldPosition" }
+        for _, m in ipairs(methods) do
+            if type(g_farmlandManager[m]) == "function" then
+                local ok, ret = pcall(g_farmlandManager[m], g_farmlandManager, x, z)
+                if ok then
+                    Logging.info("[MyTodos] g_farmlandManager:%s -> %s",
+                        m, tostring(ret))
+                    if type(ret) == "number" then
+                        local fl = g_farmlandManager.farmlands
+                            and g_farmlandManager.farmlands[ret]
+                        if fl ~= nil then
+                            local owner = g_farmlandManager:getFarmlandOwner(ret)
+                            Logging.info("[MyTodos]   -> farmland.name=%s owner=%s (your farmId=%s)",
+                                tostring(fl.name), tostring(owner),
+                                tostring(self.farmId))
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Field-Polygon-Lookup: durchlaufen, point-in-polygon (ray casting)
+    --    auf field.polygonPoints. Damit sehen wir welche field-Instanz
+    --    diese Stelle als Teil ihres Polygons hat.
+    if g_fieldManager ~= nil then
+        for fmKey, field in pairs(g_fieldManager:getFields()) do
+            local pts = field.polygonPoints
+            if type(pts) == "table" and #pts >= 3 then
+                local inside = false
+                local n = #pts
+                local px, _, pz = getWorldTranslation(pts[n])
+                local lastX, lastZ = px, pz
+                for i = 1, n do
+                    local cx, _, cz = getWorldTranslation(pts[i])
+                    if ((cz > z) ~= (lastZ > z))
+                            and (x < (lastX - cx) * (z - cz) / (lastZ - cz) + cx) then
+                        inside = not inside
+                    end
+                    lastX, lastZ = cx, cz
+                end
+                if inside then
+                    local fl = field.farmland
+                    Logging.info("[MyTodos] field-polygon contains pos: fmKey=%s farmland.name=%s farmland.id=%s",
+                        tostring(fmKey),
+                        tostring(fl and fl.name),
+                        tostring(fl and fl.id))
+                end
+            end
+        end
+    end
+
+    -- 3. Direkt-Sample der Frucht-Density-Map am Punkt. Probiere
+    --    bekannte API-Kandidaten -- FSDensityMapUtil ist in FS25 ge-scrubbed,
+    --    wir muessen Trial-and-Error machen.
+    if FSDensityMapUtil ~= nil then
+        local probeMethods = {
+            "getFruitTypeIndexAtWorldPos",
+            "getFruitAtWorldPos",
+        }
+        for _, m in ipairs(probeMethods) do
+            if type(FSDensityMapUtil[m]) == "function" then
+                local ok, a, b = pcall(FSDensityMapUtil[m], x, z)
+                Logging.info("[MyTodos] FSDensityMapUtil.%s(x,z): ok=%s r1=%s r2=%s",
+                    m, tostring(ok), tostring(a), tostring(b))
+            end
+        end
+    end
+
+    -- 4. Pro Frucht: getFruitArea ueber 1m^2-Box am Punkt -- wenn dieser
+    --    Punkt von einem Frucht-Pixel bedeckt ist, area>0. So sehen wir
+    --    welche Frucht physisch unter den Reifen ist.
+    if FSDensityMapUtil ~= nil and type(FSDensityMapUtil.getFruitArea) == "function"
+            and g_fruitTypeManager ~= nil then
+        local sx, sz = x - 0.5, z - 0.5
+        local wx, wz = 1, 0
+        local hx, hz = 0, 1
+        local fruits = g_fruitTypeManager:getFruitTypes()
+        if type(fruits) == "table" then
+            for idx, ft in pairs(fruits) do
+                local ok, area, _, _ = pcall(FSDensityMapUtil.getFruitArea,
+                    ft.index or idx, sx, sz, wx, wz, hx, hz)
+                if ok and (area or 0) > 0 then
+                    Logging.info("[MyTodos] fruit at pos: %s (area=%s)",
+                        tostring(ft.name), tostring(area))
+                end
+            end
+        end
+    end
+
+    return "Position probed - check log"
+end
+
+-- Sample alle bekannten Fruchtindizes 1..60 an der aktuellen Position
+-- und logge jeden -- damit wir mit Gewissheit sehen welche Frucht laut
+-- Density-Map auf diesem Punkt liegt. Behebt Unklarheit ob meine
+-- getFruitTypes()-Iteration in mtWhereAmI Weizen evtl. ueberspringt.
+addConsoleCommand("mtFruitHere",
+    "Sample EVERY fruit index in the registry at current world pos",
+    "consoleFruitHereCmd", MyTodos)
+function MyTodos:consoleFruitHereCmd()
+    -- Reuse position-finding (selber Block wie in mtWhereAmI, kompakt)
+    local cm = g_currentMission
+    local x, z
+    if _G.g_localPlayer ~= nil and _G.g_localPlayer.controlledVehicle ~= nil
+            and _G.g_localPlayer.controlledVehicle.rootNode ~= nil then
+        x, _, z = getWorldTranslation(_G.g_localPlayer.controlledVehicle.rootNode)
+    end
+    if x == nil and cm ~= nil and cm.vehicleSystem ~= nil
+            and type(cm.vehicleSystem.vehicles) == "table" then
+        for _, veh in ipairs(cm.vehicleSystem.vehicles) do
+            if veh.rootNode ~= nil then
+                local active = false
+                for _, m in ipairs({"getIsEntered", "getIsControlled"}) do
+                    if type(veh[m]) == "function" then
+                        local ok, r = pcall(veh[m], veh)
+                        if ok and r == true then active = true; break end
+                    end
+                end
+                if active then
+                    x, _, z = getWorldTranslation(veh.rootNode)
+                    break
+                end
+            end
+        end
+    end
+    if x == nil then return "no vehicle position -- get in a tractor first" end
+    Logging.info("[MyTodos] mtFruitHere at x=%.2f z=%.2f", x, z)
+
+    if g_fruitTypeManager == nil or FSDensityMapUtil == nil
+            or type(FSDensityMapUtil.getFruitArea) ~= "function" then
+        return "g_fruitTypeManager or FSDensityMapUtil missing"
+    end
+
+    local sx, sz = x - 0.5, z - 0.5
+    local wx, wz = 1, 0
+    local hx, hz = 0, 1
+    local hits = 0
+    for i = 1, 60 do
+        local ft = g_fruitTypeManager:getFruitTypeByIndex(i)
+        if ft ~= nil then
+            local ok, area, total = pcall(FSDensityMapUtil.getFruitArea,
+                i, sx, sz, wx, wz, hx, hz)
+            local areaNum = (ok and type(area) == "number") and area or 0
+            local marker = ""
+            if areaNum > 0 then
+                marker = "  <-- PRESENT"
+                hits = hits + 1
+            end
+            Logging.info("[MyTodos] idx=%2d name=%-22s area=%s total=%s%s",
+                i, tostring(ft.name),
+                tostring(area), tostring(total), marker)
+        end
+    end
+    return string.format("Fruit-here probe done -- %d fruit(s) present at this point",
+        hits)
 end
 
 addConsoleCommand("mtFields", "List all fields with ID/number/name candidates",

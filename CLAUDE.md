@@ -444,6 +444,66 @@ Die zentrale PF-Instanz erreicht man indirekt via `pHMap.pfModule`. Auch `g_modM
 
 ---
 
+## Ignorierte Felder
+
+Spieler kann pro Feld einen Ignore-Schalter setzen — Feld verschwindet
+komplett aus dem HUD (z.B. weil Kuhstall drauf gebaut, oder Feld an
+fremde Farm verpachtet). Aktivierung: Settings-Dialog -> Sektion
+"Ignorierte Felder" (jedes eigene Feld als Click-Toggle-Zeile), oder
+`mtIgnore <feldNr>` / `mtUnignore <feldNr>` als Power-User-Shortcut.
+
+**Persistenz**: in derselben `MyTodos.xml` wie die anderen Settings,
+flache `<ignored save="..." farmId="..." id="..."/>`-Liste am
+Top-Level. Pro Save (`g_currentMission.missionInfo.savegameIndex`)
+plus FarmId eigener Bucket. Saves nebeneinander bleiben getrennt --
+beim Save-Wechsel oder neuem Save zeigt MyTodos automatisch wieder
+alle Felder. **Wichtig**: `savegameName` wird BEWUSST NICHT als
+Schluessel genutzt -- der Wert ist user-renamable und kann ueber
+zwei Saves identisch oder leer sein. `savegameIndex` (Slot-Nummer)
+ist die einzig zuverlaessige Eindeutigkeit pro Save in FS25.
+
+**MP-Sicht**: ModSettings-Datei ist **lokal pro User** (liegt in
+`<UserProfileApp>/modSettings/`), nicht serverseitig. Wir nehmen NICHT
+den Save-Ordner -- Clients haben da keinen Schreibzugriff. Heisst:
+jeder Spieler in einer MP-Session kann seine eigene private Ignore-
+Liste pflegen. Wenn zwei Spieler in derselben Farm spielen (gleiche
+FarmId), bekommt jeder trotzdem seine eigene Sicht weil die Datei
+lokal liegt. Wenn ein Solo-Spieler zwischen Saves wechselt, sind die
+Listen sauber pro (savegameName, farmId) getrennt.
+
+**Datenstruktur**: `self.ignoredFieldsAllSaves[saveKey] = { [fieldId] = true }`
+mit `saveKey = savegameName .. "|" .. farmId`. `saveKey` wird lazy
+berechnet (braucht farmId, kommt erst in `update()`). API:
+`isFieldIgnored(id)`, `setFieldIgnored(id, bool)`, `toggleFieldIgnored(id)`
+in `MyTodos.lua`. Set/Toggle triggert direkt `saveSettings()` plus
+silent `scanFields(false)` damit HUD nicht erst beim naechsten 5s-Tick
+aktualisiert.
+
+**fieldId-Typ**: kanonisch `tonumber(farmland.name) or farmland.name`
+-- auf Vanilla-Maps ein int, auf modded Maps mit Named-Farmlands
+("North Pasture") ein String. Console-Commands normalisieren via
+`_resolveIgnoreFieldId(arg)` damit der Lookup-Key matched egal wie der
+Spieler die Nummer reintippt.
+
+**Filter** im Scan: in `scanFields` vor `deriveFieldTask` -> wenn
+ignoriert, ganzes Feld ueberspringen (kein History-Update, kein
+fieldState-Read, kein Sampling -- echte Performance-Einsparung wenn
+man mehrere Felder ignoriert hat). `fieldOwnedCount` zaehlt aber
+weiterhin alle eigenen Felder, damit "(keine eigenen Felder/Tiere)"
+nicht faelschlich erscheint wenn alle Felder ignoriert sind --
+stattdessen kommt "(nichts zu tun)".
+
+**Settings-UI**: am Ende von `_buildSettingRows` werden alle eigenen
+Felder aus `collectOwnedFields(self.farmId)` sortiert nach numerisch
+aufsteigend / sonst alphabetisch und mit Click-Toggle-Zeile
+gerendert. Verkaufte Felder fallen automatisch aus der Liste (nicht
+mehr owned), aber ihr Eintrag bleibt im XML stehen -- damit
+Re-Kauf den Toggle-State wieder findet.
+
+**Bekannte Limitierung**: bei sehr grossen Farmen (30+ Felder) kann
+das Settings-Panel unten aus dem Bildschirm rauslaufen. Aktuell keine
+Pagination/Scroll -- wird Phase 2 falls echte Beschwerde.
+
 ## Settings-Menü (echtes GUI für Maus-Decoupling)
 
 Alt+M öffnet einen ScreenElement der über `g_gui:showGui("MyTodosSettingsScreen")` läuft → Engine entkoppelt Maus automatisch (wie ESC-Menü). Im Screen wird das Settings-Panel gezeichnet via `drawSettingsContent()` und Klicks via `handleSettingsClick()` an MyTodos delegiert.
@@ -508,6 +568,14 @@ Discovery + Task-Derivation live (10. Mai 2026). HUD zeigt eine zweite Sektion "
 3. **Düngen-Lockout-Persistence**: optional, nice-to-have.
 4. **`weedFactor`-Schwelle**: User hat angemerkt dass `Unkraut` ohne Prozent (weedState=1, weedFactor=0) ggf. nervt — Trigger könnte auf `weedFactor > 0` oder kleine Schwelle geschärft werden.
 5. **PF-Detection**: aktuell wird nach `g_precisionFarming` und ein paar Mod-Namen geguckt — falls `mtRescan` "precision farming: no" ausgibt obwohl PF läuft, in `detectPrecisionFarming()` den korrekten Mod-Folder-Namen ergänzen.
+
+## Stand 13. Mai 2026 (Ignorierte Felder)
+
+- **Per-Feld Ignore-Schalter** -- siehe Sektion "Ignorierte Felder"
+  oben. Settings-Dialog kriegt unten eine dynamische Liste aller
+  eigenen Felder mit Click-Toggle; Console-Shortcuts `mtIgnore` /
+  `mtUnignore`. Persistenz: pro (Savegame, FarmId)-Paar eigener
+  Bucket in `MyTodos.xml`, MP-safe weil lokal pro User.
 
 ## Stand 13. Mai 2026 (Lokalisierung)
 

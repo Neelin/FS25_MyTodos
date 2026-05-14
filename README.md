@@ -118,6 +118,11 @@ In the settings dialog you can:
   you forget the key combo
 - Adjust **thresholds** for husbandry tasks (food, water, straw,
   pasture / manure, slurry, milk) in 5% steps
+- **Ignore individual fields** — every owned field appears as a
+  toggleable row at the bottom. Useful when you've built a barn on
+  top of a field, leased it out, or just want it gone from the HUD.
+  Ignored fields are scoped per save + farm, so different saves don't
+  bleed into each other.
 
 Toggles are persisted to `<UserProfileApp>/modSettings/MyTodos.xml`.
 
@@ -160,6 +165,7 @@ If a task is wrong or missing, these commands in the FS console
 | `mtProbePf [fieldNo]` | Dump the Precision Farming API surface |
 | `mtDebugPf <fieldNo>` | Histogram of pH/N/soil density-map values in field polygon |
 | `mtProbeHusbandry` / `mtProbeHusbandryDeep` | Dump the husbandry API |
+| `mtIgnore <fieldNo>` / `mtUnignore <fieldNo>` | Hide / show a field in the HUD |
 | `mtSettings` | Open the settings dialog (alternative to Alt+M) |
 
 `<fieldNo>` is always the **field number as shown on the map**

@@ -113,6 +113,7 @@ MyTodos.L10N_KEYS = {
     "myTodos_setting_waterThreshold", "myTodos_setting_strawThreshold",
     "myTodos_setting_meadowThreshold", "myTodos_setting_manureThreshold",
     "myTodos_setting_liquidManureThreshold", "myTodos_setting_milkThreshold",
+    "myTodos_group_ignored_fields", "myTodos_settings_field_label",
     "myTodos_task_plow", "myTodos_task_seed", "myTodos_task_cultivate",
     "myTodos_task_roll", "myTodos_task_mulch", "myTodos_task_lime",
     "myTodos_task_stones", "myTodos_task_fertilize",
@@ -175,6 +176,13 @@ function MyTodos:onMapLoaded()
     for _, def in ipairs(MyTodos.SETTING_DEFS) do
         self.settings[def.key] = def.default
     end
+
+    -- Ignorierte Felder: pro (Savegame, FarmId)-Kombination eine Tabelle
+    -- { [fieldId] = true }. Wird aus MyTodos.xml geladen, ueberlebt
+    -- Save-Reload + neue Saves nebeneinander. saveKey wird lazy beim
+    -- ersten Scan berechnet (braucht farmId).
+    self.ignoredFieldsAllSaves = {}
+    self.saveKey = nil
 
     self:loadSettings()
     self:checkL10n()
@@ -248,16 +256,20 @@ function MyTodos:scanFields(verbose)
         end
     end
 
-    -- History updaten + Tasks ableiten; passive Felder rausfiltern
+    -- History updaten + Tasks ableiten; passive Felder rausfiltern.
+    -- Vom Spieler manuell ignorierte Felder werden komplett uebersprungen
+    -- (siehe Settings -> Ignorierte Felder, oder mtIgnore-Console).
     local tasks = {}
     for _, entry in ipairs(owned) do
-        local fs = entry.field.fieldState
-        if fs ~= nil then
-            self:updateFieldHistory(entry.fieldId, fs)
-        end
-        local task = self:deriveFieldTask(entry.field, entry.fieldId)
-        if task ~= nil then
-            table.insert(tasks, { fieldId = entry.fieldId, task = task })
+        if not self:isFieldIgnored(entry.fieldId) then
+            local fs = entry.field.fieldState
+            if fs ~= nil then
+                self:updateFieldHistory(entry.fieldId, fs)
+            end
+            local task = self:deriveFieldTask(entry.field, entry.fieldId)
+            if task ~= nil then
+                table.insert(tasks, { fieldId = entry.fieldId, task = task })
+            end
         end
     end
     table.sort(tasks, function(a, b)
@@ -269,6 +281,8 @@ function MyTodos:scanFields(verbose)
     self.fieldTasks = tasks
 
     if verbose then
+        Logging.info("[MyTodos] save key for ignore list: %s",
+            tostring(self:getSaveKey()))
         local pf = self.precisionFarming
         local pfMsg = pf or "no"
         if pf == "loaded-inactive" then
@@ -354,6 +368,74 @@ function MyTodos:cyclePercentSetting(key)
     local nxt = cur + MyTodos.PERCENT_STEP
     if nxt > MyTodos.PERCENT_MAX then nxt = MyTodos.PERCENT_MIN end
     self:setSetting(key, nxt)
+end
+
+-- Ignorierte Felder ------------------------------------------------
+--
+-- Pro (Savegame, FarmId)-Paar eine eigene Liste. Saves nebeneinander
+-- bleiben sauber getrennt; in MP hat jeder Client (= jede FarmId) seine
+-- eigene Sicht. Persistiert in MyTodos.xml als flache <ignored>-Liste,
+-- jeder Eintrag traegt save/farmId/id auf einmal.
+
+function MyTodos:_getSavegameName()
+    local mi = g_currentMission and g_currentMission.missionInfo
+    if mi == nil then return "default" end
+    -- savegameIndex ist die Save-Slot-Nummer und damit eindeutig pro
+    -- Save -- bevorzugt. savegameName ist user-renamable und kann leer
+    -- bzw. ueber zwei Saves identisch sein, daher unzuverlaessig als
+    -- Schluessel. savegameDirectory als zweite Sicherung.
+    if type(mi.savegameIndex) == "number" then
+        return "savegame" .. tostring(mi.savegameIndex)
+    end
+    if type(mi.savegameDirectory) == "string" and mi.savegameDirectory ~= "" then
+        local base = mi.savegameDirectory:match("([^/\\]+)$")
+        if base ~= nil then return base end
+    end
+    if type(mi.savegameName) == "string" and mi.savegameName ~= "" then
+        return mi.savegameName
+    end
+    return "default"
+end
+
+function MyTodos:getSaveKey()
+    if self.saveKey ~= nil then return self.saveKey end
+    if self.farmId == nil then return nil end
+    self.saveKey = self:_getSavegameName() .. "|" .. tostring(self.farmId)
+    return self.saveKey
+end
+
+-- Bucket fuer aktuelle (Savegame, FarmId)-Kombination; legt leeren Bucket
+-- an wenn noch keiner existiert. nil bis farmId bekannt ist.
+function MyTodos:_currentIgnoreBucket()
+    local key = self:getSaveKey()
+    if key == nil then return nil end
+    if self.ignoredFieldsAllSaves[key] == nil then
+        self.ignoredFieldsAllSaves[key] = {}
+    end
+    return self.ignoredFieldsAllSaves[key]
+end
+
+function MyTodos:isFieldIgnored(fieldId)
+    local b = self:_currentIgnoreBucket()
+    if b == nil then return false end
+    return b[fieldId] == true
+end
+
+function MyTodos:setFieldIgnored(fieldId, ignored)
+    local b = self:_currentIgnoreBucket()
+    if b == nil then return false end
+    b[fieldId] = ignored and true or nil
+    self:saveSettings()
+    -- Sofortiger silent rescan damit das HUD nicht erst beim naechsten
+    -- 5s-Tick aktualisiert. Auf Server kein farmId-Reset noetig.
+    if self.farmId ~= nil then
+        self:scanFields(false)
+    end
+    return true
+end
+
+function MyTodos:toggleFieldIgnored(fieldId)
+    return self:setFieldIgnored(fieldId, not self:isFieldIgnored(fieldId))
 end
 
 function MyTodos:updateMouseCursor()
@@ -555,6 +637,7 @@ end
 
 -- Baut die Render-Liste fuer das Settings-Panel. Group-Wechsel wird in
 -- eine Sub-Header-Zeile uebersetzt; sonst pro Setting eine Click-Zeile.
+-- Am Ende dynamisch: pro eigenes Feld eine Ignorier-Toggle-Zeile.
 function MyTodos:_buildSettingRows()
     local rows = {}
     local lastGroupKey = nil
@@ -574,6 +657,35 @@ function MyTodos:_buildSettingRows()
             text = self:_settingRowText(def),
         })
     end
+
+    -- Dynamische Ignorier-Felder-Sektion. Listet ALLE eigenen Felder
+    -- mit ihrem Toggle-State; Klick flippt den State direkt.
+    if self.farmId ~= nil then
+        local owned = self:collectOwnedFields(self.farmId)
+        if #owned > 0 then
+            table.sort(owned, function(a, b)
+                local an, bn = tonumber(a.fieldId), tonumber(b.fieldId)
+                if an ~= nil and bn ~= nil then return an < bn end
+                return tostring(a.fieldId) < tostring(b.fieldId)
+            end)
+            table.insert(rows, {
+                isHeader = true,
+                text = "── " .. self:t("myTodos_group_ignored_fields") .. " ──",
+            })
+            for _, entry in ipairs(owned) do
+                local ignored = self:isFieldIgnored(entry.fieldId)
+                local mark = ignored and "[X]" or "[ ]"
+                local label = self:t("myTodos_settings_field_label",
+                    tostring(entry.fieldId))
+                table.insert(rows, {
+                    isIgnoreField = true,
+                    fieldId = entry.fieldId,
+                    text = string.format("%s  %s", mark, label),
+                })
+            end
+        end
+    end
+
     return rows
 end
 
@@ -637,6 +749,8 @@ function MyTodos:drawSettingsContent()
             table.insert(rowBounds, {
                 key = row.key,
                 type = row.type,
+                isIgnoreField = row.isIgnoreField,
+                fieldId = row.fieldId,
                 left = panelLeft,
                 bottom = y - lineH,
                 width = panelW,
@@ -677,6 +791,8 @@ function MyTodos:handleSettingsClick(posX, posY)
                 if g_gui ~= nil and g_gui.showGui ~= nil then
                     g_gui:showGui("")
                 end
+            elseif row.isIgnoreField then
+                self:toggleFieldIgnored(row.fieldId)
             elseif row.type == "percent" then
                 self:cyclePercentSetting(row.key)
             else
@@ -712,9 +828,35 @@ function MyTodos:loadSettings()
             if v ~= nil then self.settings[def.key] = v end
         end
     end
+
+    -- Ignorierte Felder: flache <ignored save="..." farmId="..." id="..."/>
+    -- Liste, gruppiert nach (save, farmId) in self.ignoredFieldsAllSaves.
+    -- Eintraege fuer Saves die der Spieler aktuell nicht spielt bleiben
+    -- erhalten -- sind nur "schlafend" und werden bei naechstem saveSettings
+    -- mit zurueckgeschrieben.
+    local count = 0
+    local idx = 0
+    while true do
+        local base = string.format("myTodos.ignored(%d)", idx)
+        local save = getXMLString(xmlFile, base .. "#save")
+        if save == nil then break end
+        local farmIdStr = getXMLString(xmlFile, base .. "#farmId")
+        local idStr = getXMLString(xmlFile, base .. "#id")
+        if farmIdStr ~= nil and idStr ~= nil then
+            local key = save .. "|" .. farmIdStr
+            if self.ignoredFieldsAllSaves[key] == nil then
+                self.ignoredFieldsAllSaves[key] = {}
+            end
+            local fid = tonumber(idStr) or idStr
+            self.ignoredFieldsAllSaves[key][fid] = true
+            count = count + 1
+        end
+        idx = idx + 1
+    end
+
     delete(xmlFile)
-    Logging.info("[MyTodos] loaded settings: hudVisible=%s",
-        tostring(self.settings.hudVisible))
+    Logging.info("[MyTodos] loaded settings: hudVisible=%s, %d ignored-field entries",
+        tostring(self.settings.hudVisible), count)
 end
 
 function MyTodos:saveSettings()
@@ -734,6 +876,26 @@ function MyTodos:saveSettings()
             setXMLInt(xmlFile, p, self.settings[def.key] or def.default or MyTodos.PERCENT_MIN)
         end
     end
+
+    -- Ignorierte Felder: alle Saves zurueckschreiben (auch die wo wir
+    -- gerade nicht drinhocken), damit der Spieler beim Wechsel zwischen
+    -- Saves seine Liste nicht verliert. Key-Format: "<savename>|<farmId>".
+    local outIdx = 0
+    for saveKey, bucket in pairs(self.ignoredFieldsAllSaves) do
+        local sep = saveKey:find("|", 1, true)
+        if sep ~= nil then
+            local saveName = saveKey:sub(1, sep - 1)
+            local farmIdStr = saveKey:sub(sep + 1)
+            for fieldId, _ in pairs(bucket) do
+                local base = string.format("myTodos.ignored(%d)", outIdx)
+                setXMLString(xmlFile, base .. "#save", saveName)
+                setXMLString(xmlFile, base .. "#farmId", farmIdStr)
+                setXMLString(xmlFile, base .. "#id", tostring(fieldId))
+                outIdx = outIdx + 1
+            end
+        end
+    end
+
     saveXMLFile(xmlFile)
     delete(xmlFile)
 end
