@@ -69,6 +69,7 @@
         <!-- Tier-Husbandries -->
         <text name="myTodos_husb_default_name"      text="Tiere"/>
         <text name="myTodos_husb_food"              text="Futter %.0f%%"/>
+        <text name="myTodos_husb_tmr"               text="Mischration %.0f%%"/>
         <text name="myTodos_husb_water"             text="Wasser %.0f%%"/>
         <text name="myTodos_husb_meadow"            text="Weide %.0f%%"/>
         <text name="myTodos_husb_straw"             text="Stroh %.0f%%"/>

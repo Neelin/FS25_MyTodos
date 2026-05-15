@@ -345,6 +345,20 @@ function MyTodos:husbandryProbeDeep()
                         tostring(food.litersPerHour),
                         tostring(food.animalTypeIndex))
                     self:_dumpKVTable("fillLevels", food.fillLevels)
+                    -- fillLevels mit aufgeloesten fillType-Namen: zeigt
+                    -- welcher Index Gras / TMR / Heu etc. ist. Noetig fuer
+                    -- den Kuh-TMR-Fix (Gras im Trog != Kuh gefuettert).
+                    if type(food.fillLevels) == "table"
+                            and g_fillTypeManager ~= nil then
+                        for ft, lvl in pairs(food.fillLevels) do
+                            local def = g_fillTypeManager:getFillTypeByIndex(ft)
+                            Logging.info("[MyTodos]       food[%s] name=%s title=%s level=%s",
+                                tostring(ft),
+                                def and tostring(def.name) or "?",
+                                def and tostring(def.title) or "?",
+                                tostring(lvl))
+                        end
+                    end
                     self:_dumpKVTable("fillTypes", food.fillTypes)
                     self:_dumpKVTable("supportedFillTypes", food.supportedFillTypes)
                     if food.info ~= nil then
@@ -700,17 +714,78 @@ function MyTodos:_filltypeRatio(p, fillTypeIdx)
     return lvl / cap
 end
 
+-- Cached lookup fuer den FORAGE-fillType (= Totalmischration / TMR). Der
+-- kanonische fillType-Name ist "FORAGE" -- per mtProbeHusbandryDeep
+-- bestaetigt (der Anzeige-Titel "Totalmischration" ist NICHT der Name).
+function MyTodos:_tmrFillTypeIdx()
+    if self._tmrFillTypeIdxCached ~= nil then
+        if self._tmrFillTypeIdxCached == false then return nil end
+        return self._tmrFillTypeIdxCached
+    end
+    if g_fillTypeManager == nil
+            or type(g_fillTypeManager.getFillTypeByName) ~= "function" then
+        self._tmrFillTypeIdxCached = false
+        return nil
+    end
+    local ok, ft = pcall(g_fillTypeManager.getFillTypeByName,
+        g_fillTypeManager, "FORAGE")
+    if not ok or type(ft) ~= "table" or type(ft.index) ~= "number" then
+        self._tmrFillTypeIdxCached = false
+        return nil
+    end
+    self._tmrFillTypeIdxCached = ft.index
+    return ft.index
+end
+
+-- Ratio eines einzelnen fillTypes in einer Futter-Spec, bezogen auf die
+-- Gesamt-Futter-Capacity. Liest food.fillLevels/food.capacity direkt
+-- (probe-bestaetigt) -- analog zu _specFillRatio, nur fuer einen Typ.
+function MyTodos:_foodFillTypeRatio(food, fillTypeIdx)
+    if food == nil or fillTypeIdx == nil
+            or type(food.fillLevels) ~= "table" then
+        return nil
+    end
+    local cap = food.capacity
+    if type(cap) ~= "number" or cap <= 0 then return nil end
+    local lvl = food.fillLevels[fillTypeIdx]
+    if type(lvl) ~= "number" then lvl = 0 end
+    return lvl / cap
+end
+
 -- Liefert task-string fuer eine Husbandry, oder nil wenn nichts ansteht.
 function MyTodos:deriveHusbandryTask(entry)
     local p = entry.placeable
     local parts = {}
 
-    -- Futter
+    -- Stall ohne Tiere -> keine Tasks. Futter/Wasser/Mist sind irrelevant
+    -- solange niemand eingestallt ist (User-Entscheidung 15.05.2026).
+    if self:_husbandryNumAnimals(p) == 0 then
+        return nil
+    end
+
+    -- Futter. Spezialfall TMR-faehige Husbandries (Kuehe): nur die echte
+    -- Totalmischration (FORAGE) zaehlt. Loses Gras/Heu und "gestrecktes"
+    -- Futter (FORAGE_*_FAILED) im Trog halten die Kuehe zwar am Leben,
+    -- druecken die Produktion aber auf ~40% -- die Summe ueber alle
+    -- fillTypes wuerde den Stall faelschlich als satt werten. TMR-
+    -- Erkennung: FORAGE steht in food.supportedFillTypes.
     local food = p.spec_husbandryFood
-    local foodRatio = self:_specFillRatio(p, food, "capacity")
-    if foodRatio ~= nil
-            and foodRatio < self:_pctThreshold("foodThreshold", 20) / 100 then
-        table.insert(parts, self:t("myTodos_husb_food", foodRatio * 100))
+    local tmrIdx = self:_tmrFillTypeIdx()
+    local usesTmr = tmrIdx ~= nil and food ~= nil
+            and type(food.supportedFillTypes) == "table"
+            and food.supportedFillTypes[tmrIdx] == true
+    if usesTmr then
+        local r = self:_foodFillTypeRatio(food, tmrIdx)
+        if r ~= nil
+                and r < self:_pctThreshold("foodThreshold", 20) / 100 then
+            table.insert(parts, self:t("myTodos_husb_tmr", r * 100))
+        end
+    else
+        local foodRatio = self:_specFillRatio(p, food, "capacity")
+        if foodRatio ~= nil
+                and foodRatio < self:_pctThreshold("foodThreshold", 20) / 100 then
+            table.insert(parts, self:t("myTodos_husb_food", foodRatio * 100))
+        end
     end
 
     -- Wasser (nur wenn manuell)
@@ -722,12 +797,15 @@ function MyTodos:deriveHusbandryTask(entry)
         end
     end
 
-    -- Weide (Pasture)
-    local meadow = p.spec_husbandryMeadow
-    local meadowRatio = self:_meadowRatio(meadow)
-    if meadowRatio ~= nil
-            and meadowRatio < self:_pctThreshold("meadowThreshold", 20) / 100 then
-        table.insert(parts, self:t("myTodos_husb_meadow", meadowRatio * 100))
+    -- Weide (Pasture) -- bei TMR-Husbandries skippen: die Kuehe sind ueber
+    -- die TMR versorgt, ein zusaetzlicher Weide-Task waere irrefuehrend.
+    if not usesTmr then
+        local meadow = p.spec_husbandryMeadow
+        local meadowRatio = self:_meadowRatio(meadow)
+        if meadowRatio ~= nil
+                and meadowRatio < self:_pctThreshold("meadowThreshold", 20) / 100 then
+            table.insert(parts, self:t("myTodos_husb_meadow", meadowRatio * 100))
+        end
     end
 
     -- Stroh (Input - "leer = nachfuellen", umgekehrt zu Mist/Guelle)

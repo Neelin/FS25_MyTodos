@@ -69,6 +69,7 @@
         <!-- Husbandries -->
         <text name="myTodos_husb_default_name"      text="Animaux"/>
         <text name="myTodos_husb_food"              text="Nourriture %.0f%%"/>
+        <text name="myTodos_husb_tmr"               text="Ration mélangée %.0f%%"/>
         <text name="myTodos_husb_water"             text="Eau %.0f%%"/>
         <text name="myTodos_husb_meadow"            text="Pâturage %.0f%%"/>
         <text name="myTodos_husb_straw"             text="Paille %.0f%%"/>
