@@ -921,7 +921,8 @@ function MyTodos:scanHusbandries(verbose)
     for _, entry in ipairs(owned) do
         local task = self:deriveHusbandryTask(entry)
         if task ~= nil then
-            table.insert(self.husbandryTasks, { name = entry.name, task = task })
+            table.insert(self.husbandryTasks, { name = entry.name, task = task,
+                iconFile = self:_animalIconFile(entry.placeable) })
         end
     end
 

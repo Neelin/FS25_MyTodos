@@ -1615,22 +1615,44 @@ function MyTodos:consoleProbeIconsCmd()
         Logging.info("[MyTodos] g_fruitTypeManager: nil")
     end
 
-    -- 3. Tier-Icons: erste eigene Husbandry, animalType + erster subType.
+    -- 3. Tier-Icons: animalType selbst hat KEIN Icon-Feld. Kandidaten
+    --    abklopfen: Placeable-storeItem, animalType.subTypes, der
+    --    animalSystem-subType und ein evtl. daran haengender Tier-fillType.
     if self.farmId ~= nil then
         local owned = self:collectOwnedHusbandries(self.farmId)
-        local entry = owned and owned[1]
-        local anim = entry and entry.placeable
-            and entry.placeable.spec_husbandryAnimals or nil
-        if anim ~= nil and anim.animalType ~= nil then
-            self:dumpKeys("husbandryAnimals.animalType", anim.animalType)
-            if type(anim.animalType.subTypes) == "table" then
-                local st = anim.animalType.subTypes[1]
-                if type(st) == "table" then
-                    self:dumpKeys("animalType.subTypes[1]", st)
+        local p = owned and owned[1] and owned[1].placeable or nil
+        if p ~= nil then
+            if p.storeItem ~= nil then
+                self:dumpKeys("placeable.storeItem", p.storeItem)
+            else
+                Logging.info("[MyTodos] placeable.storeItem: nil")
+            end
+            local at = p.spec_husbandryAnimals
+                and p.spec_husbandryAnimals.animalType or nil
+            if at ~= nil and type(at.subTypes) == "table" then
+                for k, st in pairs(at.subTypes) do
+                    if type(st) == "table" then
+                        self:dumpKeys(string.format("animalType.subTypes[%s]",
+                            tostring(k)), st)
+                    end
                 end
             end
         else
-            Logging.info("[MyTodos] no owned husbandry with animalType found")
+            Logging.info("[MyTodos] no owned husbandry found")
+        end
+    end
+    if g_currentMission ~= nil and g_currentMission.animalSystem ~= nil
+            and type(g_currentMission.animalSystem.subTypes) == "table" then
+        local st = g_currentMission.animalSystem.subTypes[1]
+        if type(st) == "table" then
+            self:dumpKeys("animalSystem.subTypes[1]", st)
+            local fti = st.fillTypeIndex
+            if type(fti) == "number" and g_fillTypeManager ~= nil then
+                local ft = g_fillTypeManager:getFillTypeByIndex(fti)
+                if ft ~= nil then
+                    self:dumpKeys(string.format("subType.fillType[%d]", fti), ft)
+                end
+            end
         end
     end
 

@@ -530,10 +530,18 @@ function MyTodos:drawHud()
     local lineH = size * MyTodos.HUD_LINE_SPACING
     local padX = MyTodos.HUD_PAD_X
     local padY = MyTodos.HUD_PAD_Y
-    -- Frucht-Icon links neben Feld-Zeilen: quadratisch, leicht groesser
-    -- als die Texthoehe, vertikal auf der Zeile zentriert.
+    -- Icon links neben Feld-/Tier-Zeilen: leicht groesser als die
+    -- Texthoehe, vertikal zentriert. iconSize ist die HOEHE; die Breite
+    -- (iconW) muss per Screen-Aspect korrigiert werden, sonst wird das
+    -- Icon in die Breite gezogen (HUD-Koords 0..1 sind nicht quadratisch).
     local iconSize = size * 1.2
     local iconGap = size * 0.35
+    local screenAspect = 16 / 9
+    if g_screenWidth ~= nil and g_screenHeight ~= nil
+            and g_screenHeight > 0 then
+        screenAspect = g_screenWidth / g_screenHeight
+    end
+    local iconW = iconSize / screenAspect
 
     local titleText = self:t("myTodos_hud_title")
     setTextBold(true)
@@ -553,7 +561,7 @@ function MyTodos:drawHud()
         table.insert(rows, { text = text, color = color, isHeader = isHeader,
             iconFile = iconFile })
         local w = getTextWidth(size, text)
-        if iconFile ~= nil then w = w + iconSize + iconGap end
+        if iconFile ~= nil then w = w + iconW + iconGap end
         maxW = math.max(maxW, w)
     end
 
@@ -599,7 +607,7 @@ function MyTodos:drawHud()
             end
             emitSection(hTasks, MyTodos.HUD_MAX_HUSB_LINES, function(t)
                 return t.task
-            end)
+            end, function(t) return t.iconFile end)
         end
     end
 
@@ -637,9 +645,9 @@ function MyTodos:drawHud()
             if ov ~= nil then
                 setOverlayColor(ov, 1, 1, 1, 1)
                 renderOverlay(ov, textLeft, y - size * 0.5 - iconSize * 0.5,
-                    iconSize, iconSize)
+                    iconW, iconSize)
             end
-            rowTextLeft = textLeft + iconSize + iconGap
+            rowTextLeft = textLeft + iconW + iconGap
         end
         renderText(rowTextLeft, y, size, row.text)
         if row.isHeader then setTextBold(false) end
@@ -672,6 +680,35 @@ function MyTodos:_fruitIconFile(fruitTypeIndex)
         return nil
     end
     return ft.hudOverlayFilename
+end
+
+-- Aufloesung einer Tier-Husbandry -> Icon-Pfad. Jeder Animal-SubType
+-- traegt einen fillTypeIndex; dessen fillType hat das hudOverlayFilename
+-- (z.B. hud_fill_cow.png). Wir nehmen den ersten SubType der zum
+-- animalType der Husbandry passt -- alle SubTypes einer Tierart teilen
+-- sich dasselbe Icon. Kette per mtProbeIcons bestaetigt.
+function MyTodos:_animalIconFile(p)
+    if p == nil then return nil end
+    local anim = p.spec_husbandryAnimals
+    local at = anim ~= nil and anim.animalType or nil
+    if at == nil or at.typeIndex == nil then return nil end
+    if g_currentMission == nil or g_currentMission.animalSystem == nil
+            or g_fillTypeManager == nil then
+        return nil
+    end
+    local subTypes = g_currentMission.animalSystem.subTypes
+    if type(subTypes) ~= "table" then return nil end
+    for _, st in ipairs(subTypes) do
+        if type(st) == "table" and st.typeIndex == at.typeIndex
+                and type(st.fillTypeIndex) == "number" then
+            local ft = g_fillTypeManager:getFillTypeByIndex(st.fillTypeIndex)
+            if ft ~= nil and type(ft.hudOverlayFilename) == "string"
+                    and ft.hudOverlayFilename ~= "" then
+                return ft.hudOverlayFilename
+            end
+        end
+    end
+    return nil
 end
 
 -- Cached Overlay-Handle fuer einen Icon-Pfad. createImageOverlay nur
