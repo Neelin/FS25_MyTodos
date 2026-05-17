@@ -1566,3 +1566,73 @@ function MyTodos:consoleDebugPfCmd(arg)
     end
     return "mtDebugPf done - check log"
 end
+
+-- Diagnose: dumpt Icon-Pfade von fillTypes/fruitTypes/Tieren ins Log.
+-- Ziel ist herauszufinden WIE das Icon-Pfad-Feld heisst, bevor wir es
+-- im HUD verwenden (kein Raten -- siehe TMR-"FORAGE"-Lektion).
+addConsoleCommand("mtProbeIcons",
+    "Dump fillType/fruitType/animal icon paths to the log",
+    "consoleProbeIconsCmd", MyTodos)
+function MyTodos:consoleProbeIconsCmd()
+    Logging.info("[MyTodos] === icon probe ===")
+
+    -- 1. FillType-Descs einiger Fruechte. dumpKeys zeigt String-Felder
+    --    inline (Wert sichtbar) -> daran sehen wir das Icon-Pfad-Feld.
+    if g_fillTypeManager ~= nil and FillType ~= nil then
+        local names = {"WHEAT", "BARLEY", "CANOLA", "MAIZE", "POTATO",
+            "SUGARBEET", "SUNFLOWER", "GRASS_WINDROW", "FORAGE"}
+        for _, n in ipairs(names) do
+            local idx = FillType[n]
+            local ft = idx ~= nil
+                and g_fillTypeManager:getFillTypeByIndex(idx) or nil
+            if ft ~= nil then
+                self:dumpKeys(string.format("fillType.%s[%s]", n, tostring(idx)), ft)
+            else
+                Logging.info("[MyTodos] fillType.%s: not found", n)
+            end
+        end
+    else
+        Logging.info("[MyTodos] g_fillTypeManager / FillType: nil")
+    end
+
+    -- 2. FruitType -> FillType-Verknuepfung. Am Feld liegt fruitTypeIndex;
+    --    fuers Icon brauchen wir den Weg zu einem fillType.
+    if g_fruitTypeManager ~= nil then
+        self:_listClassMethods("g_fruitTypeManager", g_fruitTypeManager)
+        local fruit = g_fruitTypeManager:getFruitTypeByIndex(1)
+        if fruit ~= nil then
+            self:dumpKeys(string.format("fruitType[1] (%s)",
+                tostring(fruit.name)), fruit)
+        end
+        if type(g_fruitTypeManager.getFillTypeIndexByFruitTypeIndex) == "function" then
+            local ok, fillIdx = pcall(
+                g_fruitTypeManager.getFillTypeIndexByFruitTypeIndex,
+                g_fruitTypeManager, 1)
+            Logging.info("[MyTodos] getFillTypeIndexByFruitTypeIndex(1) -> ok=%s val=%s",
+                tostring(ok), tostring(fillIdx))
+        end
+    else
+        Logging.info("[MyTodos] g_fruitTypeManager: nil")
+    end
+
+    -- 3. Tier-Icons: erste eigene Husbandry, animalType + erster subType.
+    if self.farmId ~= nil then
+        local owned = self:collectOwnedHusbandries(self.farmId)
+        local entry = owned and owned[1]
+        local anim = entry and entry.placeable
+            and entry.placeable.spec_husbandryAnimals or nil
+        if anim ~= nil and anim.animalType ~= nil then
+            self:dumpKeys("husbandryAnimals.animalType", anim.animalType)
+            if type(anim.animalType.subTypes) == "table" then
+                local st = anim.animalType.subTypes[1]
+                if type(st) == "table" then
+                    self:dumpKeys("animalType.subTypes[1]", st)
+                end
+            end
+        else
+            Logging.info("[MyTodos] no owned husbandry with animalType found")
+        end
+    end
+
+    return "Icon probe done - check log"
+end

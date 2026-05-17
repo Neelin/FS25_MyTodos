@@ -260,7 +260,12 @@ function MyTodos:scanFields(verbose)
             end
             local task = self:deriveFieldTask(entry.field, entry.fieldId)
             if task ~= nil then
-                table.insert(tasks, { fieldId = entry.fieldId, task = task })
+                local iconFile = nil
+                if fs ~= nil then
+                    iconFile = self:_fruitIconFile(fs.fruitTypeIndex)
+                end
+                table.insert(tasks, { fieldId = entry.fieldId, task = task,
+                    iconFile = iconFile })
             end
         end
     end
@@ -525,6 +530,10 @@ function MyTodos:drawHud()
     local lineH = size * MyTodos.HUD_LINE_SPACING
     local padX = MyTodos.HUD_PAD_X
     local padY = MyTodos.HUD_PAD_Y
+    -- Frucht-Icon links neben Feld-Zeilen: quadratisch, leicht groesser
+    -- als die Texthoehe, vertikal auf der Zeile zentriert.
+    local iconSize = size * 1.2
+    local iconGap = size * 0.35
 
     local titleText = self:t("myTodos_hud_title")
     setTextBold(true)
@@ -540,14 +549,17 @@ function MyTodos:drawHud()
     local showSubHeaders = hasField and hasHusb
 
     local rows = {}
-    local function addRow(text, color, isHeader)
-        table.insert(rows, { text = text, color = color, isHeader = isHeader })
-        maxW = math.max(maxW, getTextWidth(size, text))
+    local function addRow(text, color, isHeader, iconFile)
+        table.insert(rows, { text = text, color = color, isHeader = isHeader,
+            iconFile = iconFile })
+        local w = getTextWidth(size, text)
+        if iconFile ~= nil then w = w + iconSize + iconGap end
+        maxW = math.max(maxW, w)
     end
 
     -- Schreibt bis maxLines Tasks aus `tasks` (formatiert via fmt) ins
     -- rows-Array. Wenn ueberlaeuft, eine "(+N weitere)"-Zeile am Ende.
-    local emitSection = function(tasks, maxLines, fmt)
+    local emitSection = function(tasks, maxLines, fmt, iconFn)
         local shown = 0
         for _, t in ipairs(tasks) do
             if shown >= maxLines then
@@ -555,7 +567,8 @@ function MyTodos:drawHud()
                     MyTodos.HUD_DIM_COLOR, false)
                 return
             end
-            addRow(fmt(t), MyTodos.HUD_TEXT_COLOR, false)
+            addRow(fmt(t), MyTodos.HUD_TEXT_COLOR, false,
+                iconFn ~= nil and iconFn(t) or nil)
             shown = shown + 1
         end
     end
@@ -576,7 +589,7 @@ function MyTodos:drawHud()
             end
             emitSection(fTasks, MyTodos.HUD_MAX_FIELD_LINES, function(t)
                 return self:t("myTodos_hud_field_row", tostring(t.fieldId), t.task)
-            end)
+            end, function(t) return t.iconFile end)
         end
 
         if hasHusb then
@@ -618,7 +631,17 @@ function MyTodos:drawHud()
         local c = row.color
         setTextColor(c[1], c[2], c[3], c[4])
         if row.isHeader then setTextBold(true) end
-        renderText(textLeft, y, size, row.text)
+        local rowTextLeft = textLeft
+        if row.iconFile ~= nil then
+            local ov = self:_getIconOverlay(row.iconFile)
+            if ov ~= nil then
+                setOverlayColor(ov, 1, 1, 1, 1)
+                renderOverlay(ov, textLeft, y - size * 0.5 - iconSize * 0.5,
+                    iconSize, iconSize)
+            end
+            rowTextLeft = textLeft + iconSize + iconGap
+        end
+        renderText(rowTextLeft, y, size, row.text)
         if row.isHeader then setTextBold(false) end
         y = y - lineH
     end
@@ -626,6 +649,48 @@ function MyTodos:drawHud()
     setTextAlignment(RenderText.ALIGN_LEFT)
     setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_BASELINE)
     setTextColor(1, 1, 1, 1)
+end
+
+-- Icon-Helfer (HUD-Frucht-Icons) -------------------------------------
+
+-- Aufloesung fruitTypeIndex (am Feld) -> Icon-Pfad des zugehoerigen
+-- fillTypes. Kette per mtProbeIcons bestaetigt:
+-- getFillTypeIndexByFruitTypeIndex -> fillType.hudOverlayFilename.
+function MyTodos:_fruitIconFile(fruitTypeIndex)
+    if type(fruitTypeIndex) ~= "number" or fruitTypeIndex <= 0 then
+        return nil
+    end
+    if g_fruitTypeManager == nil or g_fillTypeManager == nil then
+        return nil
+    end
+    local ok, fillIdx = pcall(g_fruitTypeManager.getFillTypeIndexByFruitTypeIndex,
+        g_fruitTypeManager, fruitTypeIndex)
+    if not ok or type(fillIdx) ~= "number" then return nil end
+    local ft = g_fillTypeManager:getFillTypeByIndex(fillIdx)
+    if ft == nil or type(ft.hudOverlayFilename) ~= "string"
+            or ft.hudOverlayFilename == "" then
+        return nil
+    end
+    return ft.hudOverlayFilename
+end
+
+-- Cached Overlay-Handle fuer einen Icon-Pfad. createImageOverlay nur
+-- einmal pro Datei (Overlays leben die Session). false = Pfad kaputt.
+function MyTodos:_getIconOverlay(filename)
+    if type(filename) ~= "string" then return nil end
+    if self._iconOverlayCache == nil then self._iconOverlayCache = {} end
+    local cached = self._iconOverlayCache[filename]
+    if cached ~= nil then
+        if cached == false then return nil end
+        return cached
+    end
+    local ok, ov = pcall(createImageOverlay, filename)
+    if ok and ov ~= nil and ov ~= 0 then
+        self._iconOverlayCache[filename] = ov
+        return ov
+    end
+    self._iconOverlayCache[filename] = false
+    return nil
 end
 
 -- Settings persistence ----------------------------------------------
