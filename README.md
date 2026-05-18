@@ -190,6 +190,15 @@ If a task is wrong or missing, these commands in the FS console
 
 ## License / credits
 
-Personal mod by Tobias.
+Mod by Tobias (GitHub: [Neelin](https://github.com/Neelin)). Licensed under
+the **MIT License** — see [LICENSE](LICENSE).
 
-Uses only FS25 vanilla APIs (no external mod dependencies).
+You're free to use, modify and redistribute the code. The MIT license requires
+that the copyright notice is kept in copies. Beyond that — if you build
+something of your own on top of this mod, a friendly mention or link back to
+the original (**Neelin / FS25_MyTodos**) would be genuinely appreciated. That
+part isn't legally binding, just good modder etiquette. 🙂
+
+Uses only FS25 vanilla APIs (no external mod dependencies). FS25 game assets
+(e.g. crop/animal HUD icons) are referenced at runtime only, remain the
+property of GIANTS Software, and are not redistributed with this mod.
