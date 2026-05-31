@@ -150,25 +150,15 @@ save. Each client sees *their own* fields and husbandries.
 
 ## Console commands (diagnostics)
 
-If a task is wrong or missing, these commands in the FS console
-(open with `~`, may need to be enabled in `game.xml`) help debug:
+If a task is wrong or missing, MyTodos ships `mt*` console commands for live
+debugging — `mtRescan`, `mtDump <fieldNumber>`, `mtProbeWeed <fieldNumber>`
+and many more. They require the FS developer console (open with `~`, may
+need enabling in `game.xml`) and write to `log.txt`.
 
-| Command | Purpose |
-|---|---|
-| `mtRescan` | Force an immediate re-scan of all fields/husbandries |
-| `mtDump <fieldNo>` | Dump `fieldState` and fruit properties |
-| `mtForceUpdate <fieldNo>` | Trigger `field:updateState()`, log before/after |
-| `mtFields` | List all fields with their IDs/names |
-| `mtProbeStones <fieldNo>` | Sample the stone density map |
-| `mtProbeWeed <fieldNo>` | Sample the weed density map |
-| `mtProbeWindrowAt <fieldNo>` | Sample the windrow density map |
-| `mtProbePf [fieldNo]` | Dump the Precision Farming API surface |
-| `mtDebugPf <fieldNo>` | Histogram of pH/N/soil density-map values in field polygon |
-| `mtProbeHusbandry` / `mtProbeHusbandryDeep` | Dump the husbandry API |
-| `mtIgnore <fieldNo>` / `mtUnignore <fieldNo>` | Hide / show a field in the HUD |
-| `mtSettings` | Open the settings dialog (alternative to Alt+M) |
+**See [COMMANDS.md](COMMANDS.md) for the full reference** — all commands
+grouped by purpose.
 
-`<fieldNo>` is always the **field number as shown on the map**
+`<fieldNumber>` is always the **field number as shown on the map**
 (internally: `field.farmland.name`).
 
 ---
