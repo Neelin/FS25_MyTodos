@@ -1658,3 +1658,56 @@ function MyTodos:consoleProbeIconsCmd()
 
     return "Icon probe done - check log"
 end
+
+-- Diagnose: dumpt gueltige Overlay-Slice-IDs aus g_overlayManager. Zweck:
+-- den korrekten Vanilla-Slice fuers Settings-Tab-Icon (Slider+Zahnrad)
+-- finden OHNE zu raten -- die Slice-Config liegt gepackt in dataS.gar und
+-- ist nur zur Laufzeit greifbar (g_overlayManager.textureConfigs[prefix].slices).
+-- Ohne Argument: Settings-/Zahnrad-Kandidaten. Mit Argument: Substring-Filter.
+--   mtDumpSlices            -> option/setting/gear/cog/... Kandidaten
+--   mtDumpSlices options    -> alle Slices die "options" enthalten
+addConsoleCommand("mtDumpSlices",
+    "Dump g_overlayManager slice IDs (optional substring filter)",
+    "consoleDumpSlicesCmd", MyTodos)
+function MyTodos:consoleDumpSlicesCmd(filter)
+    local om = g_overlayManager
+    if om == nil or type(om.textureConfigs) ~= "table" then
+        Logging.info("[MyTodos] g_overlayManager.textureConfigs not available")
+        return "no overlay manager"
+    end
+
+    local keywords
+    if filter ~= nil and filter ~= "" then
+        keywords = { string.lower(tostring(filter)) }
+    else
+        keywords = { "option", "setting", "gear", "cog", "slider",
+            "menu", "general", "config", "wrench", "tool", "gameplay" }
+    end
+
+    local function matchesId(id)
+        local low = string.lower(id)
+        for _, kw in ipairs(keywords) do
+            if string.find(low, kw, 1, true) ~= nil then return true end
+        end
+        return false
+    end
+
+    Logging.info("[MyTodos] === mtDumpSlices (filter=%s) ===",
+        (filter ~= nil and filter ~= "") and tostring(filter) or "settings-keywords")
+    local total = 0
+    for prefix, cfg in pairs(om.textureConfigs) do
+        if type(cfg) == "table" and type(cfg.slices) == "table" then
+            local ids = {}
+            for id in pairs(cfg.slices) do
+                if matchesId(id) then table.insert(ids, id) end
+            end
+            table.sort(ids)
+            for _, id in ipairs(ids) do
+                Logging.info("[MyTodos]   %s.%s", tostring(prefix), id)
+                total = total + 1
+            end
+        end
+    end
+    Logging.info("[MyTodos] mtDumpSlices done (%d matched)", total)
+    return "mtDumpSlices done - check log"
+end

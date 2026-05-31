@@ -50,9 +50,8 @@ function MyTodosSettingsMenu.setupGui()
         MessageType.GUI_MYTODOS_OPEN = nextMessageTypeId()
     end
 
+    -- Nur noch EINE Page (kombiniert alle Settings auf einem Tab).
     MyTodosGeneralPage.setupGui()
-    MyTodosHusbandryPage.setupGui()
-    MyTodosFieldsPage.setupGui()
 
     g_myTodosSettingsMenu = MyTodosSettingsMenu.new(
         nil, nil, g_messageCenter, g_i18n, g_inputBinding)
@@ -70,19 +69,17 @@ function MyTodosSettingsMenu:initializePages()
     end
 
     self.pageGeneral:initialize(self)
-    self.pageHusbandry:initialize(self)
-    self.pageFields:initialize(self)
 end
 
 function MyTodosSettingsMenu:setupMenuPages()
-    -- Reihenfolge bestimmt die Tab-Reihenfolge oben. Predicate gibt true
-    -- zurueck wenn der Tab aktivierbar ist (analog Courseplay --
-    -- Vehicle-Tab dort nur sichtbar wenn man im Fahrzeug sitzt etc.).
-    -- Bei uns alle Tabs immer aktiv.
+    -- Nur noch EIN Tab: alle Settings auf einer Page. Icon = das ESC-Menue-
+    -- "Einstellungen"-Tab-Icon (Zahnrad/Slider). Per mtDumpSlices als gueltiger
+    -- Slice verifiziert. Alternativen falls optisch gewuenscht:
+    -- gui.icon_options_generalSettings / gui.icon_options_gameSettings.
+    -- (Frueheres gui.icon_options_gameplay existiert NICHT -> Kuh-Fallback;
+    --  gui.icon_gear war das Getriebe-Symbol.)
     local pages = {
-        { self.pageGeneral,   function () return true end, "gui.icon_options_gameplay" },
-        { self.pageHusbandry, function () return true end, "gui.icon_options_audio" },
-        { self.pageFields,    function () return true end, "gui.icon_options_controls" },
+        { self.pageGeneral, function () return true end, "gui.icon_ingameMenu_options" },
     }
     for i, def in ipairs(pages) do
         local page, predicate, sliceId = unpack(def)
@@ -96,38 +93,21 @@ end
 function MyTodosSettingsMenu:setupMenuButtonInfo()
     MyTodosSettingsMenu:superClass().setupMenuButtonInfo(self)
     local onBack = self.clickBackCallback
-    local onPrev = self:makeSelfCallback(self.onPagePrevious)
-    local onNext = self:makeSelfCallback(self.onPageNext)
 
     self.backButtonInfo = {
         inputAction = InputAction.MENU_BACK,
         text = g_i18n:getText(InGameMenu.L10N_SYMBOL.BUTTON_BACK),
         callback = onBack,
     }
-    self.nextPageButtonInfo = {
-        inputAction = InputAction.MENU_PAGE_NEXT,
-        text = g_i18n:getText("ui_ingameMenuNext"),
-        callback = self.onPageNext,
-    }
-    self.prevPageButtonInfo = {
-        inputAction = InputAction.MENU_PAGE_PREV,
-        text = g_i18n:getText("ui_ingameMenuPrev"),
-        callback = self.onPagePrevious,
-    }
 
+    -- Nur noch eine Page -> keine Prev/Next-Buttons, nur "Zurueck".
     self.defaultMenuButtonInfo = {
         self.backButtonInfo,
-        self.nextPageButtonInfo,
-        self.prevPageButtonInfo,
     }
-    self.defaultMenuButtonInfoByActions[InputAction.MENU_BACK]      = self.defaultMenuButtonInfo[1]
-    self.defaultMenuButtonInfoByActions[InputAction.MENU_PAGE_NEXT] = self.defaultMenuButtonInfo[2]
-    self.defaultMenuButtonInfoByActions[InputAction.MENU_PAGE_PREV] = self.defaultMenuButtonInfo[3]
+    self.defaultMenuButtonInfoByActions[InputAction.MENU_BACK] = self.defaultMenuButtonInfo[1]
 
     self.defaultButtonActionCallbacks = {
-        [InputAction.MENU_BACK]      = onBack,
-        [InputAction.MENU_PAGE_NEXT] = onNext,
-        [InputAction.MENU_PAGE_PREV] = onPrev,
+        [InputAction.MENU_BACK] = onBack,
     }
 end
 

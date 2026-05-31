@@ -107,6 +107,13 @@ local function clonePercent(def, parent, prefab, currentValue, onChange)
     return row
 end
 
+-- Exponierter Section-Header-Helper: fuegt manuell eine Sub-Header-Zeile ins
+-- Layout ein. Genutzt von der kombinierten Single-Page, um zwischen den
+-- Gruppen (Allgemein / Tiere / Felder) Ueberschriften zu setzen.
+function MyTodosSettingsUtil.addSectionHeader(text, layout, sectionPrefab)
+    return cloneSectionHeader(text, layout, sectionPrefab)
+end
+
 -- Hauptfunktion: nimmt eine gefilterte Liste von SETTING_DEFS, eine Layout-
 -- Box und drei Prefab-Elemente und baut die Settings-Liste auf.
 -- onChange wird pro Setting aufgerufen mit (def, newValue).

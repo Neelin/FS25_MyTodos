@@ -13,9 +13,7 @@
 
     <Paging profile="uiInGameMenuPaging" onPageChange="onPageChange" onPageUpdate="onPageUpdate"
             id="pagingElement">
-        <FrameReference ref="myTodosPageGeneral"   name="myTodosPageGeneral"   id="pageGeneral" />
-        <FrameReference ref="myTodosPageHusbandry" name="myTodosPageHusbandry" id="pageHusbandry" />
-        <FrameReference ref="myTodosPageFields"    name="myTodosPageFields"    id="pageFields" />
+        <FrameReference ref="myTodosPageGeneral" name="myTodosPageGeneral" id="pageGeneral" />
     </Paging>
 
     <Bitmap profile="fs25_tabListContainer" id="header">
@@ -33,12 +31,6 @@
 
     <BoxLayout profile="fs25_buttonBox" id="buttonsPanel">
         <Button profile="buttonBack" onClick="onClickBack" id="menuButton[1]">
-            <Bitmap profile="fs25_buttonBoxSeparator" name="separator" />
-        </Button>
-        <Button profile="buttonBack" onClick="onClickBack" id="menuButton[2]">
-            <Bitmap profile="fs25_buttonBoxSeparator" name="separator" />
-        </Button>
-        <Button profile="buttonBack" onClick="onClickBack" id="menuButton[3]">
             <Bitmap profile="fs25_buttonBoxSeparator" name="separator" />
         </Button>
     </BoxLayout>

@@ -30,8 +30,6 @@
         <sourceFile filename="scripts/gui/MyTodosSettingsUtil.lua"/>
         <sourceFile filename="scripts/gui/pages/MyTodosBasePage.lua"/>
         <sourceFile filename="scripts/gui/pages/MyTodosGeneralPage.lua"/>
-        <sourceFile filename="scripts/gui/pages/MyTodosHusbandryPage.lua"/>
-        <sourceFile filename="scripts/gui/pages/MyTodosFieldsPage.lua"/>
         <sourceFile filename="scripts/gui/MyTodosSettingsMenu.lua"/>
     </extraSourceFiles>
 
