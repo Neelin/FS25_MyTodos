@@ -45,6 +45,7 @@ MyTodos.HUD_BG_COLOR        = { 0,    0,    0,    0.75 }
 MyTodos.HUD_HEADER_COLOR    = { 0.20, 0.40, 0.05, 0.95 }
 MyTodos.HUD_TEXT_COLOR      = { 1,    1,    1,    1 }
 MyTodos.HUD_DIM_COLOR       = { 0.78, 0.78, 0.78, 1 }
+MyTodos.HUD_SEP_COLOR       = { 1,    1,    1,    0.22 }
 MyTodos.HUD_HEADER_TEXT     = { 1,    1,    1,    1 }
 
 MyTodos.SETTINGS_FILENAME = "MyTodos.xml"
@@ -592,7 +593,7 @@ function MyTodos:drawHud()
     else
         if hasField then
             if showSubHeaders then
-                addRow("── " .. self:t("myTodos_section_fields") .. " ──",
+                addRow(string.upper(self:t("myTodos_section_fields")),
                     MyTodos.HUD_DIM_COLOR, true)
             end
             emitSection(fTasks, MyTodos.HUD_MAX_FIELD_LINES, function(t)
@@ -602,7 +603,7 @@ function MyTodos:drawHud()
 
         if hasHusb then
             if showSubHeaders then
-                addRow("── " .. self:t("myTodos_section_animals") .. " ──",
+                addRow(string.upper(self:t("myTodos_section_animals")),
                     MyTodos.HUD_DIM_COLOR, true)
             end
             emitSection(hTasks, MyTodos.HUD_MAX_HUSB_LINES, function(t)
@@ -636,6 +637,13 @@ function MyTodos:drawHud()
 
     local y = panelTop - headerH - padY
     for _, row in ipairs(rows) do
+        if row.isHeader then
+            -- duenne Trennlinie ueber dem Header, setzt die Sektion
+            -- sichtbar von den Aufgaben darueber ab.
+            local sepH = size * 0.12
+            self:drawPanel(textLeft, y + size * 0.2 - sepH * 0.5,
+                panelW - 2 * padX, sepH, MyTodos.HUD_SEP_COLOR)
+        end
         local c = row.color
         setTextColor(c[1], c[2], c[3], c[4])
         if row.isHeader then setTextBold(true) end
