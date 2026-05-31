@@ -985,23 +985,28 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
             if growth == cutState or growth == rolledCutState then
                 return self:t("myTodos_fruit_cut", name), false
             end
-            -- Erntefaehig:
+            -- Erntefaehig ueber das ganze Engine-Fenster [lowerBound..maxHarvest]
+            -- = exakt die foliageStates mit isHarvestReady=true.
             --   Mit Preparing-Stadium (Sugarcane: minPrep=8, maxHarvest=11):
-            --     Range [minPrep..maxHarvest] - Spieler kann state 8 direkt
-            --     ernten oder vorher Blaetter brennen -> state 11 (prepared)
-            --     -> ernten. Beides ist actionable.
-            --   Ohne Preparing (Gras):
-            --     Nur bei vollem Yield als "Ernten" - frueher maehen geht aber
-            --     bringt weniger Yield. Wir warten auf maxHarvest.
+            --     lowerBound=minPrep - Spieler kann state 8 direkt ernten oder
+            --     vorher Blaetter brennen -> state 11 (prepared) -> ernten.
+            --   Ohne Preparing (Gras, Alfalfa): lowerBound=minHarvest.
+            --     Alfalfa hat ein echtes Mehr-State-Fenster (greenMiddle=5
+            --     yieldScale .6, greenMiddle2=6 .8, harvestReady=7 1.0) und
+            --     parkt saisonal auf 6 (LATE_SPRING + Autumn-Knockback haben
+            --     keinen 6->7 Uebergang), erreicht maxHarvest also nicht
+            --     zuverlaessig. "Auf maxHarvest warten" war ein Yield-Opt-Hint
+            --     (gegen die Tool-Philosophie) und verschluckte Alfalfa@6.
+            --     Gras (min=3/max=4) zeigt damit ab greenMiddle - engine-korrekt.
             local minPrep = fruit.minPreparingGrowthState
-            local hasPrep = minPrep ~= nil and minPrep >= 1
-            local inHarvestRange
-            if hasPrep then
-                inHarvestRange = maxHarvest ~= nil
-                    and growth >= minPrep and growth <= maxHarvest
+            local lowerBound
+            if minPrep ~= nil and minPrep >= 1 then
+                lowerBound = minPrep
             else
-                inHarvestRange = maxHarvest ~= nil and growth == maxHarvest
+                lowerBound = minHarvest
             end
+            local inHarvestRange = maxHarvest ~= nil and lowerBound ~= nil
+                and growth >= lowerBound and growth <= maxHarvest
             if inHarvestRange then
                 return self:t("myTodos_fruit_harvest", name), true
             end
