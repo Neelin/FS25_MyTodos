@@ -18,8 +18,14 @@ MyTodos.MOD_NAME = g_currentModName
 MyTodos.MOD_DIR = g_currentModDirectory
 MyTodos.VERSION = "0.0.1"
 
+-- Nach so langer Wartezeit ohne farmId loggen wir EINMAL einen Hinweis
+-- (kein Aufgeben mehr -- wir pollen weiter, siehe reconcileFarmId).
 MyTodos.SCAN_TIMEOUT_MS = 30000
 MyTodos.RESCAN_INTERVAL_MS = 5000
+-- Takt fuer den farmId-Abgleich (Erst-Zuweisung, Admin-Farmwechsel,
+-- Farmverlust). Bewusst kurz: Erstzuweisung soll schnell greifen, der
+-- Aufwand ist ein simpler getFarmId()-Vergleich.
+MyTodos.FARM_POLL_INTERVAL_MS = 3000
 
 -- Abstand zwischen InputHelp-rechte-Kante und MyTodos-linke-Kante
 -- (normalisierte Screen-Koords).
@@ -162,6 +168,10 @@ function MyTodos:onMapLoaded()
     self.scanWaited = 0
     self.timeSinceRescan = 0
     self.firstScanDone = false
+    -- Auf Intervall vorinitialisiert, damit der allererste update()-Tick
+    -- sofort pollt (kein kuenstlicher Delay beim ersten HUD).
+    self.farmPollTimer = MyTodos.FARM_POLL_INTERVAL_MS
+    self._farmWaitLogged = false
 
     self.settingsOpen = false
     self.settings = {}
@@ -209,20 +219,24 @@ end
 -- Update / scan -----------------------------------------------------
 
 function MyTodos:update(dt)
+    -- MyTodos ist reines Client-HUD. Auf einem Dedicated Server (kein lokaler
+    -- Spieler -> isClient=false) gibt es keine lokale Farm und nichts zu
+    -- zeichnen -> gar nicht erst pollen/scannen. (draw() ist genauso geschuetzt.)
+    if not self.isClient then return end
+
+    -- farmId laufend mit der Engine abgleichen statt nur einmal beim Start:
+    --  - frisch beigetretene MP-Spieler bekommen erst spaeter eine Farm
+    --  - Admins koennen zur Laufzeit zwischen Farms wechseln
+    --  - jemand kann eine Farm verlassen (zurueck zu Spectator)
+    -- Daher dauerhaft gedrosselt pollen, nie endgueltig aufgeben/removeUpdateable.
+    self.farmPollTimer = (self.farmPollTimer or 0) + dt
+    if self.farmPollTimer >= MyTodos.FARM_POLL_INTERVAL_MS then
+        local elapsed = self.farmPollTimer
+        self.farmPollTimer = 0
+        self:reconcileFarmId(elapsed)
+    end
+
     if self.farmId == nil then
-        self.scanWaited = self.scanWaited + dt
-        local farmId = self:getLocalFarmId()
-        local spectatorId = FarmManager.SPECTATOR_FARM_ID
-        if farmId ~= nil and farmId ~= spectatorId then
-            self.farmId = farmId
-            self:scanFields(true)
-        elseif self.scanWaited > MyTodos.SCAN_TIMEOUT_MS then
-            Logging.warning("[MyTodos] gave up waiting for local farmId after %.1fs",
-                self.scanWaited / 1000)
-            if g_currentMission ~= nil and g_currentMission.removeUpdateable ~= nil then
-                g_currentMission:removeUpdateable(self)
-            end
-        end
         return
     end
 
@@ -230,6 +244,59 @@ function MyTodos:update(dt)
     if self.timeSinceRescan >= MyTodos.RESCAN_INTERVAL_MS then
         self.timeSinceRescan = 0
         self:scanFields(false)
+    end
+end
+
+-- Gleicht self.farmId mit der lebenden Engine-FarmId ab und reagiert auf
+-- alle drei MP-Faelle. Wird gedrosselt aus update() gepollt (FARM_POLL_INTERVAL_MS).
+-- elapsed = vergangene Zeit seit dem letzten Poll (fuer das Wartezeit-Logging).
+function MyTodos:reconcileFarmId(elapsed)
+    local spectatorId = FarmManager.SPECTATOR_FARM_ID
+    local live = self:getLocalFarmId()
+    local valid = live ~= nil and live ~= spectatorId
+
+    if valid then
+        if self.farmId ~= live then
+            local previous = self.farmId
+            self.farmId = live
+            self.saveKey = nil          -- saveKey haengt an farmId -> neu berechnen
+            self.fieldHistory = {}      -- History galt fuer die alte Farm
+            self.scanWaited = 0
+            self._farmWaitLogged = false
+            self.timeSinceRescan = 0
+            if previous == nil then
+                Logging.info("[MyTodos] local farmId assigned (%s) - scanning",
+                    tostring(live))
+            else
+                Logging.info("[MyTodos] local farmId changed %s -> %s - rescanning",
+                    tostring(previous), tostring(live))
+            end
+            self:scanFields(true)
+        end
+        return
+    end
+
+    -- Keine gueltige Farm (Spectator / noch nicht zugewiesen).
+    if self.farmId ~= nil then
+        -- War zugewiesen, jetzt nicht mehr -> zurueck in den Warte-Zustand,
+        -- alte Tasks raeumen damit das HUD nichts Stale zeigt.
+        Logging.info("[MyTodos] local farm lost (spectator/none) - waiting for (re)assignment")
+        self.farmId = nil
+        self.saveKey = nil
+        self.fieldTasks = {}
+        self.husbandryTasks = {}
+        self.fieldOwnedCount = 0
+        self.husbandryOwnedCount = 0
+        self.scanWaited = 0
+        self._farmWaitLogged = false
+    end
+
+    -- Einmalig nach Ablauf des Timeouts informieren, dann ruhig weiterpollen.
+    self.scanWaited = (self.scanWaited or 0) + (elapsed or 0)
+    if not self._farmWaitLogged and self.scanWaited > MyTodos.SCAN_TIMEOUT_MS then
+        self._farmWaitLogged = true
+        Logging.info("[MyTodos] still no local farmId after %.0fs - will keep checking every %.0fs (normal until you're assigned to a farm)",
+            self.scanWaited / 1000, MyTodos.FARM_POLL_INTERVAL_MS / 1000)
     end
 end
 
