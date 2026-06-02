@@ -302,17 +302,7 @@ function MyTodos:consoleProbeWindrowAtCmd(arg)
     Logging.info("[MyTodos] center=(%.1f, %.1f, %.1f) bbox dx=%.1f dz=%.1f",
         cx, cy, cz, maxX - minX, maxZ - minZ)
 
-    -- 2. Spot-Sample am Feld-Zentrum mit Y
-    if type(DensityMapHeightUtil.getHeightTypeDescAtWorldPos) == "function" then
-        local ok, a, b, c, d = pcall(DensityMapHeightUtil.getHeightTypeDescAtWorldPos, cx, cy, cz)
-        Logging.info("[MyTodos] getHeightTypeDescAtWorldPos(x,y,z): ok=%s a=%s b=%s c=%s d=%s",
-            tostring(ok), tostring(a), tostring(b), tostring(c), tostring(d))
-        if type(a) == "table" then
-            self:dumpKeys("  desc", a)
-        end
-    end
-
-    -- 3. DensityMapModifier auf den Type-Channels von terrainDetailHeightId.
+    -- 2. DensityMapModifier auf den Type-Channels von terrainDetailHeightId.
     --    Liefert Pixel-genaue Counts pro fillType im Feld-BBox.
     if DensityMapModifier ~= nil and terrainNode ~= nil
             and DensityMapHeightUtil.terrainDetailHeightId ~= nil then
