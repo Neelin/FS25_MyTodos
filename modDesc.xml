@@ -6,11 +6,15 @@
     <title>
         <en>MyTodos</en>
         <de>MyTodos</de>
+        <fr>MyTodos</fr>
+        <it>MyTodos</it>
     </title>
 
     <description>
         <en><![CDATA[Always-visible HUD listing the next pending tasks on your fields and animal husbandries.]]></en>
         <de><![CDATA[Dauerhaft sichtbares HUD mit den als nächstes anstehenden Aufgaben auf deinen Feldern und bei deinen Tieren.]]></de>
+        <fr><![CDATA[HUD toujours visible affichant les prochaines tâches à effectuer sur vos champs et dans vos élevages.]]></fr>
+        <it><![CDATA[HUD sempre visibile che mostra le prossime attività da svolgere sui tuoi campi e nei tuoi allevamenti.]]></it>
     </description>
 
     <iconFilename>icon.png</iconFilename>
