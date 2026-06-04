@@ -65,6 +65,8 @@
         <text name="myTodos_windrow_straw"          text="Pick up straw"/>
         <text name="myTodos_windrow_grass"          text="Pick up grass windrow"/>
         <text name="myTodos_windrow_hay"            text="Pick up hay"/>
+        <text name="myTodos_windrow_alfalfa"        text="Pick up alfalfa"/>
+        <text name="myTodos_windrow_alfalfa_hay"    text="Pick up alfalfa hay"/>
 
         <!-- Husbandries -->
         <text name="myTodos_husb_default_name"      text="Animals"/>

@@ -65,6 +65,8 @@
         <text name="myTodos_windrow_straw"          text="Ramasser la paille"/>
         <text name="myTodos_windrow_grass"          text="Ramasser l'andain d'herbe"/>
         <text name="myTodos_windrow_hay"            text="Ramasser le foin"/>
+        <text name="myTodos_windrow_alfalfa"        text="Ramasser l'andain de luzerne"/>
+        <text name="myTodos_windrow_alfalfa_hay"    text="Ramasser le foin de luzerne"/>
 
         <!-- Husbandries -->
         <text name="myTodos_husb_default_name"      text="Animaux"/>

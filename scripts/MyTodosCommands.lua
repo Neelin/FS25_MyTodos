@@ -255,6 +255,21 @@ function MyTodos:consoleProbeWindrowCmd()
         Logging.info("[MyTodos] DensityMapHeightUtil: nil")
     end
 
+    -- 5. Alle schwad-faehigen fillTypes auflisten (textureArrayIndex ~= nil).
+    --    Damit laesst sich der exakte Name eines modded Schwads (z.B. Luzerne/
+    --    Alfalfa) auf der aktuellen Map finden, falls er vom Standard
+    --    ALFALFA_WINDROW / DRYALFALFA_WINDROW abweicht. Den Namen dann in
+    --    MyTodos.WINDROW_TYPES (MyTodosFields.lua) eintragen.
+    if g_fillTypeManager ~= nil and type(g_fillTypeManager.fillTypes) == "table" then
+        Logging.info("[MyTodos] --- schwad-faehige fillTypes (textureArrayIndex) ---")
+        for _, ft in pairs(g_fillTypeManager.fillTypes) do
+            if type(ft) == "table" and ft.textureArrayIndex ~= nil then
+                Logging.info("[MyTodos]   %s (index=%s) -> textureArrayIndex=%s",
+                    tostring(ft.name), tostring(ft.index), tostring(ft.textureArrayIndex))
+            end
+        end
+    end
+
     return "Windrow API probe done - check log"
 end
 

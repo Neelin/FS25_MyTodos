@@ -65,6 +65,8 @@
         <text name="myTodos_windrow_straw"          text="Raccogli paglia"/>
         <text name="myTodos_windrow_grass"          text="Raccogli andana d'erba"/>
         <text name="myTodos_windrow_hay"            text="Raccogli fieno"/>
+        <text name="myTodos_windrow_alfalfa"        text="Raccogli andana di erba medica"/>
+        <text name="myTodos_windrow_alfalfa_hay"    text="Raccogli fieno di erba medica"/>
 
         <!-- Husbandries -->
         <text name="myTodos_husb_default_name"      text="Animali"/>

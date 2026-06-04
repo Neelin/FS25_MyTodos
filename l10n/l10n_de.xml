@@ -65,6 +65,8 @@
         <text name="myTodos_windrow_straw"          text="Stroh aufnehmen"/>
         <text name="myTodos_windrow_grass"          text="Gras-Schwad aufnehmen"/>
         <text name="myTodos_windrow_hay"            text="Heu aufnehmen"/>
+        <text name="myTodos_windrow_alfalfa"        text="Luzerne aufnehmen"/>
+        <text name="myTodos_windrow_alfalfa_hay"    text="Luzernenheu aufnehmen"/>
 
         <!-- Tier-Husbandries -->
         <text name="myTodos_husb_default_name"      text="Tiere"/>

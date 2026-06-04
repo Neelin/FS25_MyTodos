@@ -10,10 +10,18 @@
 
 -- labelKey: l10n-Key, wird in initWindrowSampler aufgeloest (einmalig zur
 -- Sampler-Init-Zeit). Spielsprache wechselt im laufenden Spiel nicht.
+-- ALFALFA_WINDROW / DRYALFALFA_WINDROW sind keine Vanilla-fillTypes — Luzerne
+-- kommt nur ueber Crop-/Map-Mods rein. Namen die auf der aktuellen Map nicht
+-- existieren werden in initWindrowSampler still uebersprungen (FillType[name]
+-- == nil), darum ist es ungefaehrlich sie generell mitzufuehren. Falls eine
+-- Map abweichende Namen nutzt: mtProbeWindrow listet alle schwad-faehigen
+-- fillTypes mit ihrem Namen.
 MyTodos.WINDROW_TYPES = {
-    { name = "STRAW",            labelKey = "myTodos_windrow_straw" },
-    { name = "GRASS_WINDROW",    labelKey = "myTodos_windrow_grass" },
-    { name = "DRYGRASS_WINDROW", labelKey = "myTodos_windrow_hay" },
+    { name = "STRAW",             labelKey = "myTodos_windrow_straw" },
+    { name = "GRASS_WINDROW",     labelKey = "myTodos_windrow_grass" },
+    { name = "DRYGRASS_WINDROW",  labelKey = "myTodos_windrow_hay" },
+    { name = "ALFALFA_WINDROW",   labelKey = "myTodos_windrow_alfalfa" },
+    { name = "DRYALFALFA_WINDROW", labelKey = "myTodos_windrow_alfalfa_hay" },
 }
 
 -- Mindestens so viele Pixel muessen ein bestimmten Schwadtyp haben, sonst
