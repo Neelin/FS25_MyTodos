@@ -5,7 +5,7 @@
     Mitte ein Paging-Element das die Frame-Pages haelt, unten die Button-
     Box (Back/Prev/Next).
 
-    Profile-Namen sind alle Vanilla-fs25_*-Profile -- Optik damit
+    Profile-Namen sind alle Vanilla-fs25_*-Profile — Optik damit
     identisch zum Spielmenue.
 -->
 <GUI onOpen="onOpen" onClose="onClose" onCreate="onCreate">

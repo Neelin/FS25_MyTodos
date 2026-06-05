@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
-<modDesc descVersion="90">
+<modDesc descVersion="109">
     <author>Tobias</author>
     <version>1.0.4.0</version>
 
     <title>
         <en>MyTodos</en>
-        <de>MyTodos</de>
-        <fr>MyTodos</fr>
-        <it>MyTodos</it>
     </title>
 
     <description>
@@ -17,7 +14,7 @@
         <it><![CDATA[HUD sempre visibile che mostra le prossime attività da svolgere sui tuoi campi e nei tuoi allevamenti.]]></it>
     </description>
 
-    <iconFilename>icon.png</iconFilename>
+    <iconFilename>icon_MyTodos.dds</iconFilename>
     <multiplayer supported="true"/>
 
     <l10n filenamePrefix="l10n/l10n"/>

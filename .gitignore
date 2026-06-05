@@ -32,3 +32,6 @@ MODHUB_CHECKLIST.md
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# Build-Artefakt: sauberes ModHub-Zip aus build.ps1, kein Repo-Inhalt
+FS25_MyTodos.zip
