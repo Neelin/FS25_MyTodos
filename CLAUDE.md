@@ -28,6 +28,7 @@ Nützliche Such-Einstiege:
 - `Settings TabbedMenu Courseplay fs25_settingsTitle` — GUI-Architektur
 - `Helden Feld 29 wheat WHEAT aggregate empty` — Map-Edge-Case
 - `HUD hide dialog _isAnyGuiOpen` — warum draw() drei Layer prüft
+- `TestRunner ModHub Icon DDS build.ps1 textureTool` — Release-Runbook + Compliance
 - `TODO-Snapshot` — aktuelle offene Punkte
 
 Den **Stand**/Datums-Log und die `## Offene Themen`-Liste pflegen wir
