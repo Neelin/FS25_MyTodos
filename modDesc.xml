@@ -8,10 +8,34 @@
     </title>
 
     <description>
-        <en><![CDATA[Always-visible HUD listing the next pending tasks on your fields and animal husbandries.]]></en>
-        <de><![CDATA[Dauerhaft sichtbares HUD mit den als nächstes anstehenden Aufgaben auf deinen Feldern und bei deinen Tieren.]]></de>
-        <fr><![CDATA[HUD toujours visible affichant les prochaines tâches à effectuer sur vos champs et dans vos élevages.]]></fr>
-        <it><![CDATA[HUD sempre visibile che mostra le prossime attività da svolgere sui tuoi campi e nei tuoi allevamenti.]]></it>
+        <en><![CDATA[Always-visible HUD listing the next pending tasks on your fields and animal husbandries.
+
+Hotkeys (keyboard, rebindable under Options > Controls):
+- Alt + M: open/close the settings menu
+- Right Shift + T: show/hide the HUD
+
+GitHub: https://github.com/Neelin/FS25_MyTodos]]></en>
+        <de><![CDATA[Dauerhaft sichtbares HUD mit den als nächstes anstehenden Aufgaben auf deinen Feldern und bei deinen Tieren.
+
+Tastenkürzel (Tastatur, in Optionen > Steuerung änderbar):
+- Alt + M: Einstellungsmenü öffnen/schließen
+- Rechte Umschalt + T: HUD ein-/ausblenden
+
+GitHub: https://github.com/Neelin/FS25_MyTodos]]></de>
+        <fr><![CDATA[HUD toujours visible affichant les prochaines tâches à effectuer sur vos champs et dans vos élevages.
+
+Raccourcis clavier (clavier, modifiables dans Options > Commandes) :
+- Alt + M : ouvrir/fermer le menu des paramètres
+- Maj droite + T : afficher/masquer le HUD
+
+GitHub : https://github.com/Neelin/FS25_MyTodos]]></fr>
+        <it><![CDATA[HUD sempre visibile che mostra le prossime attività da svolgere sui tuoi campi e nei tuoi allevamenti.
+
+Tasti di scelta rapida (tastiera, modificabili in Opzioni > Comandi):
+- Alt + M: apri/chiudi il menu impostazioni
+- Maiusc destro + T: mostra/nascondi l'HUD
+
+GitHub: https://github.com/Neelin/FS25_MyTodos]]></it>
     </description>
 
     <iconFilename>icon_MyTodos.dds</iconFilename>
