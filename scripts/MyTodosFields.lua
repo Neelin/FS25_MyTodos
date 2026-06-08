@@ -43,11 +43,14 @@ MyTodos.STONE_MIN_FRACTION = 0.005
 -- Zwei Schwellen, beide muessen erfuellt sein:
 -- 1. Per-state >= 1% der Feldflaeche (oder 50 Pixel) damit der state
 --    ueberhaupt als "vorhanden" zaehlt
--- 2. Gewichteter Gesamt-Faktor >= 5% damit Label rausgegeben wird
--- Damit verschwinden Mikro-Befaelle (1-3% groß-Unkraut auf grossen Feldern).
+-- 2. Gewichteter Gesamt-Faktor >= 2% damit Label rausgegeben wird
+-- Damit verschwinden nur noch Mikro-Befaelle (<2% gewichtete Abdeckung). Von
+-- urspruenglich 5% auf 2% gesenkt: Feld 53 (Witcombe, RYE) hatte 2,7%
+-- Grossunkraut (3941/145997 Px, Faktor 1.0) und fiel sichtbar verunkrautet
+-- durchs 5%-Gate -- per mtProbeWeed-Histogramm diagnostiziert.
 MyTodos.WEED_MIN_PIXELS = 50
 MyTodos.WEED_MIN_FRACTION = 0.01
-MyTodos.WEED_TOTAL_MIN_FACTOR = 0.05
+MyTodos.WEED_TOTAL_MIN_FACTOR = 0.02
 
 -- Precision-Farming "Kalk"-Schwellen. Mit PF ersetzen wir den
 -- Vanilla-Kalken-Task. Target-pH haengt vom DOMINANTEN BODENTYP des
@@ -1018,12 +1021,9 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
             if inHarvestRange then
                 return self:t("myTodos_fruit_harvest", name), true
             end
-            if fruit.plantsWeed ~= false then
-                local label = self:weedLabel(field, fs, fieldId)
-                if label ~= nil then
-                    return self:t("myTodos_fruit_with_label", name, label), true
-                end
-            end
+            -- Unkraut laeuft jetzt als eigenstaendiger Parallel-Task
+            -- (deriveParallelVanilla), nicht mehr als Label an der Wachstums-
+            -- phase -- sonst doppelt und nur waehrend Wachstum sichtbar.
             return self:t("myTodos_fruit_growing",
                 name, tostring(growth), tostring(maxHarvest)), false
         end
@@ -1078,12 +1078,6 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
                 and growth >= effectiveMinHarvest and growth <= maxHarvest then
             return self:t("myTodos_fruit_harvest", name), true
         end
-        if fruit.plantsWeed ~= false then
-            local label = self:weedLabel(field, fs, fieldId)
-            if label ~= nil then
-                return self:t("myTodos_fruit_with_label", name, label), true
-            end
-        end
         return self:t("myTodos_fruit_growing",
             name, tostring(growth), tostring(maxHarvest)), false
     end
@@ -1092,20 +1086,22 @@ function MyTodos:derivePrimaryVanilla(fs, fruit, field, fieldId)
     return self:derivePrepTask(fs, plowReq)
 end
 
--- weedState ist ein 0..9-Enum (FS25, empirisch via Cheat-Tool und in
--- weedSystem.factors bestaetigt):
---   0     = komplett sauber (Default oder nach Striegel/Spritze)
---   1, 2  = invisible / invisible dense (wachsend, noch nicht sichtbar)
---           -> "Unkraut wachsend" (Striegel jetzt verhindert sichtbares Wachstum)
---   3, 4  = klein, lebendig                            -> "Unkraut klein"
---   5     = gross, lebendig                            -> "Unkraut gross"
---   6     = klein dicht, gestriegelt aber lebt         -> "Unkraut klein"
---   7, 8, 9 = tot (mit Spritze behandelt)              -> nicht melden (verschwindet beim Cultivieren)
+-- Unkraut-Label fuer den Parallel-Task. Nur LEBENDES, sichtbares Unkraut
+-- (Stufen 3..6) wird gemeldet -- unabhaengig von der Frucht-Phase, also auch
+-- auf reifen/stehenden Fruechten (wo Jaeten nicht mehr geht, das Unkraut aber
+-- da ist und erst nach Ernte + Grubbern verschwindet).
 --
--- Quelle: bevorzugt weedSystem.densityMap polygon-sampling (siehe
--- sampleWeedForField). fs.weedState/fs.weedFactor sind Aggregate die nicht
--- zuverlaessig sind. Fallback auf Aggregat wenn Sampler nicht verfuegbar.
-function MyTodos:weedLabel(field, fs, fieldId)
+-- weedState-Enum (0..9, empirisch via Cheat-Tool + weedSystem.factors):
+--   0       = sauber (Default oder nach Striegel/Spritze)
+--   1, 2    = wachsend/unsichtbar      -> bewusst NICHT gemeldet (Rauschen)
+--   3, 4    = klein, lebendig          -> "Unkraut klein"
+--   5       = gross, lebendig          -> "Unkraut gross"
+--   6       = klein dicht, lebendig    -> "Unkraut klein"
+--   7, 8, 9 = tot (gespritzt)          -> NICHT gemeldet (verschwindet beim Grubbern)
+--
+-- Quelle: bevorzugt weedSystem.densityMap polygon-sampling (sampleWeedForField,
+-- inkl. Schwelle). Fallback auf das fieldState-Aggregat wenn Sampler fehlt.
+function MyTodos:weedParallelLabel(field, fs, fieldId)
     local state, factor
     if field ~= nil and self:initWeedSampler() then
         local s = self:sampleWeedForField(field, fieldId)
@@ -1114,11 +1110,9 @@ function MyTodos:weedLabel(field, fs, fieldId)
     else
         state = fs.weedState or 0
         factor = fs.weedFactor or 0
-        if state == 0 or state >= 7 then return nil end
     end
-    if state <= 2 then
-        return self:t("myTodos_weed_emerging")
-    end
+    -- nur lebendes, sichtbares Unkraut (3..6); 0/1/2 (wachsend) und 7..9 (tot) raus
+    if state < 3 or state > 6 then return nil end
     local isLarge = (state == 5)
     if factor > 0 then
         local key = isLarge and "myTodos_weed_large_pct" or "myTodos_weed_small_pct"
@@ -1226,6 +1220,16 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
         local windrows = self:sampleWindrowsForField(field)
         for _, label in ipairs(windrows) do
             table.insert(out, label)
+        end
+    end
+
+    -- Unkraut: eigenstaendiger Parallel-Task (lebendes Unkraut Stufe 3..6 ueber
+    -- Schwelle), unabhaengig von der Frucht-Phase -- erscheint also auch neben
+    -- "Ernten" auf reifen Fruechten und auf Stoppel-/Leerfeldern.
+    if field ~= nil then
+        local weed = self:weedParallelLabel(field, fs, fieldId)
+        if weed ~= nil then
+            table.insert(out, weed)
         end
     end
 
