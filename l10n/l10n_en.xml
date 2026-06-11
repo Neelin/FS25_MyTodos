@@ -46,10 +46,8 @@
         <text name="myTodos_fruit_forage"           text="%s: Forage"/>
         <text name="myTodos_fruit_growing"          text="%s: Growing (%s/%s)"/>
         <text name="myTodos_fruit_regrowing"        text="%s: Regrowing"/>
-        <text name="myTodos_fruit_with_label"       text="%s: %s"/>
 
         <!-- Weeds -->
-        <text name="myTodos_weed_emerging"          text="Weeds emerging"/>
         <text name="myTodos_weed_large_pct"         text="Weeds large (%.0f%%)"/>
         <text name="myTodos_weed_small_pct"         text="Weeds small (%.0f%%)"/>
         <text name="myTodos_weed_large"             text="Weeds large"/>

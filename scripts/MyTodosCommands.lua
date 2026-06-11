@@ -438,14 +438,16 @@ function MyTodos:consoleProbeWeedCmd(arg)
     local hx, hz = 0, maxZ - minZ
     Logging.info("[MyTodos] weed bbox: x=[%.1f..%.1f] z=[%.1f..%.1f]", minX, maxX, minZ, maxZ)
 
-    -- 1. FSDensityMapUtil.getWeedFactor - liefert vermutlich Live-Faktor
+    -- 1. FSDensityMapUtil.getWeedFactor - Live-Faktor fuer die Feld-Bbox.
+    --    NUR die volle 6-arg-Signatur (Parallelogramm sx,sz, wx,wz, hx,hz)!
+    --    Die fruehere 4-arg-Variante warf unter Precision Farming einen
+    --    'setParallelogramWorldCoords: Argument 5 nil'-Fehler (PF-Harvest-
+    --    Extension ueberschreibt getWeedFactor und braucht das volle
+    --    Parallelogramm) -- entfernt.
     if FSDensityMapUtil ~= nil and type(FSDensityMapUtil.getWeedFactor) == "function" then
         local ok, a, b, c = pcall(FSDensityMapUtil.getWeedFactor, sx, sz, wx, wz, hx, hz)
         Logging.info("[MyTodos] getWeedFactor(6arg): ok=%s ret1=%s ret2=%s ret3=%s",
             tostring(ok), tostring(a), tostring(b), tostring(c))
-        local ok2, a2, b2 = pcall(FSDensityMapUtil.getWeedFactor, sx, sz, wx, wz)
-        Logging.info("[MyTodos] getWeedFactor(4arg): ok=%s ret1=%s ret2=%s",
-            tostring(ok2), tostring(a2), tostring(b2))
     end
 
     -- 2. globalCandidates fuer weed-Manager / -System
