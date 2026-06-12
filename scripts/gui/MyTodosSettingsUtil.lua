@@ -68,10 +68,34 @@ local function cloneBoolean(def, parent, prefab, currentValue, onChange)
     return row
 end
 
--- Klont einen Multi-Text-Option-Row (extends MultiTextOptionElement).
--- Wir haben aktuell nur "percent" (5..95 in 5er-Schritten). Texte werden
--- pre-computed.
-local function clonePercent(def, parent, prefab, currentValue, onChange)
+-- Werteliste + Anzeige-Format fuer eine MultiTextOption aus der Def.
+--   percent: PERCENT_MIN..PERCENT_MAX in PERCENT_STEP-Schritten, "%d %%"
+--   count:   def.min..def.max in 1er-Schritten, "%d"
+--   select:  def.values verbatim, Format def.valueFormat (Default "%g")
+local function buildValueList(def)
+    local values = {}
+    local fmt
+    if def.type == "count" then
+        for v = (def.min or 1), (def.max or 30) do
+            table.insert(values, v)
+        end
+        fmt = "%d"
+    elseif def.type == "select" then
+        values = def.values or {}
+        fmt = def.valueFormat or "%g"
+    else -- "percent"
+        for v = MyTodos.PERCENT_MIN, MyTodos.PERCENT_MAX, MyTodos.PERCENT_STEP do
+            table.insert(values, v)
+        end
+        fmt = "%d %%"
+    end
+    return values, fmt
+end
+
+-- Klont einen Multi-Text-Option-Row (extends MultiTextOptionElement) fuer
+-- percent/count/select-Settings. onChange bekommt den WERT, nicht den
+-- State-Index.
+local function cloneMulti(def, parent, prefab, currentValue, onChange)
     local row = prefab:clone(parent)
     local setting = row:getDescendantByName("setting")
     local label   = row:getDescendantByName("label")
@@ -84,13 +108,17 @@ local function clonePercent(def, parent, prefab, currentValue, onChange)
         tooltip:setText(MyTodos:t(def.tooltipKey))
     end
     if setting ~= nil then
+        local values, fmt = buildValueList(def)
         local texts = {}
         local stateForValue = 1
-        local idx = 1
-        for v = MyTodos.PERCENT_MIN, MyTodos.PERCENT_MAX, MyTodos.PERCENT_STEP do
-            texts[idx] = string.format("%d %%", v)
-            if v == currentValue then stateForValue = idx end
-            idx = idx + 1
+        local cur = tonumber(currentValue)
+        for i, v in ipairs(values) do
+            texts[i] = string.format(fmt, v)
+            -- Float-tolerant vergleichen: select-Werte (z.B. 0.5) kommen
+            -- als Float aus der Settings-XML zurueck.
+            if cur ~= nil and math.abs(v - cur) < 1e-6 then
+                stateForValue = i
+            end
         end
         if setting.setTexts ~= nil then
             setting:setTexts(texts)
@@ -99,8 +127,10 @@ local function clonePercent(def, parent, prefab, currentValue, onChange)
             setting:setState(stateForValue, false)
         end
         setting.onClickCallback = function (_, state)
-            local newValue = MyTodos.PERCENT_MIN + (state - 1) * MyTodos.PERCENT_STEP
-            onChange(newValue)
+            local newValue = values[state]
+            if newValue ~= nil then
+                onChange(newValue)
+            end
         end
         FocusManager:loadElementFromCustomValues(setting)
     end
@@ -132,8 +162,9 @@ function MyTodosSettingsUtil.populateSettingsList(defs, layout, prefabs, setting
         if typ == "bool" then
             row = cloneBoolean(def, layout, prefabs.boolean, current,
                 function (v) onChange(def, v) end)
-        elseif typ == "percent" then
-            row = clonePercent(def, layout, prefabs.multi, current,
+        else
+            -- percent / count / select rendern alle als MultiTextOption
+            row = cloneMulti(def, layout, prefabs.multi, current,
                 function (v) onChange(def, v) end)
         end
 

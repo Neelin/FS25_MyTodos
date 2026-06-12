@@ -16,7 +16,15 @@
 MyTodos = {}
 MyTodos.MOD_NAME = g_currentModName
 MyTodos.MOD_DIR = g_currentModDirectory
-MyTodos.VERSION = "0.0.1"
+-- Version kommt aus der modDesc.xml (single source of truth) -- eine
+-- haendisch gepflegte Kopie hier drin driftet nur.
+MyTodos.VERSION = "?"
+if g_modManager ~= nil and type(g_modManager.getModByName) == "function" then
+    local modInfo = g_modManager:getModByName(g_currentModName)
+    if modInfo ~= nil and modInfo.version ~= nil then
+        MyTodos.VERSION = tostring(modInfo.version)
+    end
+end
 
 -- Nach so langer Wartezeit ohne farmId loggen wir EINMAL einen Hinweis
 -- (kein Aufgeben mehr -- wir pollen weiter, siehe reconcileFarmId).
@@ -56,21 +64,44 @@ MyTodos.HUD_HEADER_TEXT     = { 1,    1,    1,    1 }
 
 MyTodos.SETTINGS_FILENAME = "MyTodos.xml"
 
--- Settings catalog. type ∈ {"bool", "percent"}. percent rendert als
--- MultiTextOption mit 5..95 in 5%-Schritten.
+-- Settings catalog. type ∈ {"bool", "percent", "count", "select"}.
+--   percent: MultiTextOption 5..95 in 5%-Schritten (Int-persistiert)
+--   count:   MultiTextOption def.min..def.max in 1er-Schritten (Int)
+--   select:  MultiTextOption mit fester Werteliste def.values, Anzeige
+--            via def.valueFormat (Float-persistiert, fuer 0.5er-Schritte)
 MyTodos.PERCENT_STEP = 5
 MyTodos.PERCENT_MIN = 5
 MyTodos.PERCENT_MAX = 95
 
+-- Werteliste fuer "select"-Settings: from..to inklusive, in step-Schritten.
+local function buildRange(from, to, step)
+    local out = {}
+    local v = from
+    while v <= to + 1e-9 do
+        table.insert(out, v)
+        v = v + step
+    end
+    return out
+end
+
 -- labelKey ist ein l10n-Key (aus l10n/l10n_<lang>.xml).
--- page bestimmt in welchem Tab die Option im Settings-Menue erscheint
--- ("general", "husbandry"). Felder-Tab wird dynamisch aus eigenen Feldern
--- gebaut, nicht aus SETTING_DEFS.
+-- page bestimmt unter welchem Section-Header die Option im Settings-Menue
+-- erscheint ("general", "husbandry", "fields"). Die Sichtbarkeits-Toggles
+-- pro eigenem Feld werden zusaetzlich dynamisch gebaut, nicht aus
+-- SETTING_DEFS.
 MyTodos.SETTING_DEFS = {
     -- hudVisible kann auch via Tastenkombi (Default: RShift+T, Action
     -- MYTODOS_TOGGLE_HUD) umgeschaltet werden. Hier als Fallback im
     -- Settings-Menue, falls die Tastenbelegung vergessen wurde.
     { key = "hudVisible",  labelKey = "myTodos_setting_hudVisible",  type = "bool",    default = true, page = "general" },
+    -- Gruene Titelleiste ("MyTodos") ueber dem HUD ausblendbar.
+    { key = "hudShowHeader", labelKey = "myTodos_setting_hudShowHeader", type = "bool", default = true, page = "general" },
+    -- Zeilen-Budget pro HUD-Sektion (1..30). Min 1 garantiert dass immer
+    -- mindestens ein Feld bzw. eine Tier-Zeile sichtbar bleibt; Ueberlauf
+    -- wird wie bisher zur "(+N weitere)"-Zeile. Die Komplettuebersicht
+    -- (RShift+O) ignoriert beide Caps.
+    { key = "maxFieldLines", labelKey = "myTodos_setting_maxFieldLines", type = "count", default = 14, min = 1, max = 30, page = "general" },
+    { key = "maxHusbLines",  labelKey = "myTodos_setting_maxHusbLines",  type = "count", default = 8,  min = 1, max = 30, page = "general" },
     -- Schwellwerte: Trigger wenn Wert unter/ueber dieser Marke ist.
     -- "Futter unter 20%" heisst: Task erscheint sobald Trog unter 20% voll.
     -- "Mist ueber 80%" heisst: Task erscheint sobald Lager ueber 80% voll.
@@ -81,6 +112,13 @@ MyTodos.SETTING_DEFS = {
     { key = "manureThreshold",       labelKey = "myTodos_setting_manureThreshold",       type = "percent", default = 80, page = "husbandry" },
     { key = "liquidManureThreshold", labelKey = "myTodos_setting_liquidManureThreshold", type = "percent", default = 80, page = "husbandry" },
     { key = "milkThreshold",         labelKey = "myTodos_setting_milkThreshold",         type = "percent", default = 80, page = "husbandry" },
+    -- Sampler-Schwellen in % der Feldflaeche (Schwad/Steine) bzw. der
+    -- gewichteten Unkraut-Abdeckung. Defaults = bisheriges Verhalten
+    -- (WINDROW_/STONE_MIN_FRACTION 0.5%, WEED_TOTAL_MIN_FACTOR 2%, siehe
+    -- MyTodosFields.lua). Die 50-Pixel-Floors bleiben zusaetzlich aktiv.
+    { key = "windrowThreshold", labelKey = "myTodos_setting_windrowThreshold", type = "select", values = buildRange(0.5, 10, 0.5), valueFormat = "%g %%", default = 0.5, page = "fields" },
+    { key = "stonesThreshold",  labelKey = "myTodos_setting_stonesThreshold",  type = "select", values = buildRange(0.5, 10, 0.5), valueFormat = "%g %%", default = 0.5, page = "fields" },
+    { key = "weedThreshold",    labelKey = "myTodos_setting_weedThreshold",    type = "select", values = buildRange(0.5, 10, 0.5), valueFormat = "%g %%", default = 2, page = "fields" },
 }
 
 -- l10n-Helper: zieht einen Text aus l10n/l10n_<lang>.xml und applied
@@ -103,10 +141,16 @@ end
 -- mitvalidiert (und beide Sprachdateien gepflegt werden).
 MyTodos.L10N_KEYS = {
     "myTodos_hud_title", "myTodos_hud_no_owned", "myTodos_hud_nothing_to_do",
-    "myTodos_hud_more", "myTodos_hud_field_row",
+    "myTodos_hud_more", "myTodos_hud_field_row", "myTodos_overview_title",
+    "myTodos_overview_col_name", "myTodos_overview_col_task",
+    "myTodos_overview_col_extra",
     "myTodos_section_fields", "myTodos_section_animals",
     "myTodos_page_general", "myTodos_page_husbandry", "myTodos_page_fields",
-    "myTodos_setting_hudVisible", "myTodos_setting_foodThreshold",
+    "myTodos_setting_hudVisible", "myTodos_setting_hudShowHeader",
+    "myTodos_setting_maxFieldLines", "myTodos_setting_maxHusbLines",
+    "myTodos_setting_windrowThreshold", "myTodos_setting_stonesThreshold",
+    "myTodos_setting_weedThreshold",
+    "myTodos_setting_foodThreshold",
     "myTodos_setting_waterThreshold", "myTodos_setting_strawThreshold",
     "myTodos_setting_meadowThreshold", "myTodos_setting_manureThreshold",
     "myTodos_setting_liquidManureThreshold", "myTodos_setting_milkThreshold",
@@ -158,7 +202,57 @@ function MyTodos:onMissionLoaded(mission)
         self.VERSION, tostring(self.isServer), tostring(self.isClient))
 end
 
+-- Map-gebundene Caches invalidieren. Das Script laedt nur einmal pro
+-- Spielprozess, onMapLoaded feuert aber bei jedem Save-/Map-Wechsel --
+-- Density-Map-Sampler, PF-Map-Refs, fillType-Indizes und Icon-Overlays
+-- gelten nur fuer die jeweils geladene Map (+ Mod-Set) und wuerden sonst
+-- auf tote Handles der vorherigen Map zeigen.
+function MyTodos:resetPerMapCaches()
+    -- Field-Sampler (MyTodosFields.lua); *SamplerReady = nil triggert Re-Init
+    self.windrowSamplerReady = nil
+    self.windrowMod = nil
+    self.windrowHeightMod = nil
+    self.windrowHeightFilter = nil
+    self.windrowFilters = nil
+    self.stoneSamplerReady = nil
+    self.stoneMod = nil
+    self.stoneFilters = nil
+    self.weedSamplerReady = nil
+    self.weedMod = nil
+    self.weedFilters = nil
+    self.weedFactors = nil
+    self.phSamplerReady = nil
+    self.phMod = nil
+    self.phMap = nil
+    self.nSamplerReady = nil
+    self.nMod = nil
+    self.nMap = nil
+    self.soilSamplerReady = nil
+    self.soilMod = nil
+    self.soilMap = nil
+    self.soilFilters = nil
+    self._pfPHMapCached = nil
+    self._pfNMapCached = nil
+    self.precisionFarming = nil
+    -- Husbandry (MyTodosHusbandry.lua)
+    self._tmrFillTypeIdxCached = nil
+    -- HUD-Overlays: Engine-Handles explizit freigeben, nicht nur vergessen
+    if self._iconOverlayCache ~= nil then
+        for _, ov in pairs(self._iconOverlayCache) do
+            if ov ~= false then pcall(delete, ov) end
+        end
+        self._iconOverlayCache = nil
+    end
+    if self.bgOverlay ~= nil then
+        if type(self.bgOverlay.delete) == "function" then
+            pcall(self.bgOverlay.delete, self.bgOverlay)
+        end
+        self.bgOverlay = nil
+    end
+end
+
 function MyTodos:onMapLoaded()
+    self:resetPerMapCaches()
     self.farmId = nil
     self.fieldTasks = {}
     self.fieldHistory = {}
@@ -202,8 +296,8 @@ function MyTodos:onMapLoaded()
 end
 
 function MyTodos:setupGui()
-    if g_gui == nil or MyTodosSettingsMenu == nil then
-        Logging.warning("[MyTodos] cannot setup GUI: g_gui or MyTodosSettingsMenu missing")
+    if g_gui == nil or MyTodosSettingsMenu == nil or MyTodosOverviewDialog == nil then
+        Logging.warning("[MyTodos] cannot setup GUI: g_gui or GUI classes missing")
         return
     end
     if g_gui.guis ~= nil and g_gui.guis.MyTodosSettingsMenu ~= nil then
@@ -213,7 +307,8 @@ function MyTodos:setupGui()
     -- XML-Files sie auflösen koennen.
     g_gui:loadProfiles(MyTodos.MOD_DIR .. "config/gui/GUIProfiles.xml")
     MyTodosSettingsMenu.setupGui()
-    Logging.info("[MyTodos] settings menu registered")
+    MyTodosOverviewDialog.setupGui()
+    Logging.info("[MyTodos] settings menu + overview dialog registered")
 end
 
 -- Update / scan -----------------------------------------------------
@@ -326,13 +421,14 @@ function MyTodos:scanFields(verbose)
             if fs ~= nil then
                 self:updateFieldHistory(entry.fieldId, fs)
             end
-            local task = self:deriveFieldTask(entry.field, entry.fieldId)
+            local task, primary, parallel = self:deriveFieldTask(entry.field, entry.fieldId)
             if task ~= nil then
                 local iconFile = nil
                 if fs ~= nil then
                     iconFile = self:_fruitIconFile(fs.fruitTypeIndex)
                 end
                 table.insert(tasks, { fieldId = entry.fieldId, task = task,
+                    primary = primary or task, parallel = parallel or {},
                     iconFile = iconFile })
             end
         end
@@ -383,6 +479,7 @@ function MyTodos:registerActionEvents()
     end
     registerSilent("MYTODOS_TOGGLE_SETTINGS", MyTodos.onActionToggleSettings)
     registerSilent("MYTODOS_TOGGLE_HUD",      MyTodos.onActionToggleHud)
+    registerSilent("MYTODOS_TOGGLE_OVERVIEW", MyTodos.onActionToggleOverview)
 end
 
 function MyTodos:onActionToggleSettings()
@@ -405,6 +502,26 @@ end
 
 function MyTodos:onActionToggleHud()
     self:setSetting("hudVisible", not (self.settings.hudVisible == true))
+end
+
+-- Komplettuebersicht (alle Felder/Tiere ohne Zeilen-Caps) als Dialog
+-- oeffnen. Waehrend der Dialog offen ist gehoert der Input-Context der
+-- GUI -- diese Action feuert dann normalerweise nicht; geschlossen wird
+-- regulaer per ESC / Controller-B (MENU_BACK am Back-Button). Der
+-- Toggle-Zweig hier ist nur Absicherung falls die Action doch durchkommt.
+function MyTodos:onActionToggleOverview()
+    if g_gui == nil then return end
+    if g_gui.currentGuiName == "MyTodosOverviewDialog" then
+        if type(g_gui.closeDialogByName) == "function" then
+            g_gui:closeDialogByName("MyTodosOverviewDialog")
+        end
+        return
+    end
+    if g_gui.currentGui ~= nil then
+        -- Ein anderes Menue/Dialog ist offen -- nicht drueberstapeln.
+        return
+    end
+    g_gui:showDialog("MyTodosOverviewDialog")
 end
 
 function MyTodos:onSettingsOpened()
@@ -594,6 +711,27 @@ end
 function MyTodos:drawHud()
     -- Anker + Schriftgroesse beide aus Giants' InputHelp-Geometrie.
     local anchorX, anchorY, size = self:getHudMetrics()
+    self:_drawTaskPanel({
+        anchorX = anchorX,
+        anchorY = anchorY,
+        size = size,
+        title = self:t("myTodos_hud_title"),
+        showHeader = self.settings.hudShowHeader ~= false,
+        maxFieldLines = self:_lineBudget("maxFieldLines", MyTodos.HUD_MAX_FIELD_LINES),
+        maxHusbLines = self:_lineBudget("maxHusbLines", MyTodos.HUD_MAX_HUSB_LINES),
+    })
+end
+
+-- Zeilen-Budget einer HUD-Sektion aus den Settings, geclampt auf 1..30.
+function MyTodos:_lineBudget(key, fallback)
+    local v = tonumber(self.settings and self.settings[key]) or fallback
+    return math.max(1, math.min(30, math.floor(v)))
+end
+
+-- HUD-Panel-Renderer (am InputHelp-Anker). opts: anchorX, anchorY, size,
+-- title, showHeader, maxFieldLines, maxHusbLines.
+function MyTodos:_drawTaskPanel(opts)
+    local size = opts.size
     local titleSize = size * MyTodos.HUD_TITLE_SCALE
     local lineH = size * MyTodos.HUD_LINE_SPACING
     local padX = MyTodos.HUD_PAD_X
@@ -611,10 +749,14 @@ function MyTodos:drawHud()
     end
     local iconW = iconSize / screenAspect
 
-    local titleText = self:t("myTodos_hud_title")
-    setTextBold(true)
-    local maxW = getTextWidth(titleSize, titleText)
-    setTextBold(false)
+    local showHeader = opts.showHeader ~= false
+    local titleText = opts.title
+    local maxW = 0
+    if showHeader then
+        setTextBold(true)
+        maxW = getTextWidth(titleSize, titleText)
+        setTextBold(false)
+    end
 
     local fTasks = self.fieldTasks or {}
     local hTasks = self.husbandryTasks or {}
@@ -663,7 +805,7 @@ function MyTodos:drawHud()
                 addRow(string.upper(self:t("myTodos_section_fields")),
                     MyTodos.HUD_DIM_COLOR, true)
             end
-            emitSection(fTasks, MyTodos.HUD_MAX_FIELD_LINES, function(t)
+            emitSection(fTasks, opts.maxFieldLines, function(t)
                 return self:t("myTodos_hud_field_row", tostring(t.fieldId), t.task)
             end, function(t) return t.iconFile end)
         end
@@ -673,22 +815,24 @@ function MyTodos:drawHud()
                 addRow(string.upper(self:t("myTodos_section_animals")),
                     MyTodos.HUD_DIM_COLOR, true)
             end
-            emitSection(hTasks, MyTodos.HUD_MAX_HUSB_LINES, function(t)
+            emitSection(hTasks, opts.maxHusbLines, function(t)
                 return t.task
             end, function(t) return t.iconFile end)
         end
     end
 
     local panelW = math.max(MyTodos.HUD_MIN_WIDTH, maxW + 2 * padX)
-    local headerH = titleSize + 2 * padY
+    local headerH = showHeader and (titleSize + 2 * padY) or 0
     local bodyH = padY + #rows * lineH + padY
     local totalH = headerH + bodyH
 
-    local panelLeft = anchorX
-    local panelTop = anchorY
+    local panelLeft = opts.anchorX
+    local panelTop = opts.anchorY
     local panelBottom = panelTop - totalH
 
-    self:drawPanel(panelLeft, panelTop - headerH, panelW, headerH, MyTodos.HUD_HEADER_COLOR)
+    if showHeader then
+        self:drawPanel(panelLeft, panelTop - headerH, panelW, headerH, MyTodos.HUD_HEADER_COLOR)
+    end
     self:drawPanel(panelLeft, panelBottom, panelW, bodyH, MyTodos.HUD_BG_COLOR)
 
     setTextAlignment(RenderText.ALIGN_LEFT)
@@ -696,11 +840,13 @@ function MyTodos:drawHud()
 
     local textLeft = panelLeft + padX
 
-    setTextBold(true)
-    setTextColor(MyTodos.HUD_HEADER_TEXT[1], MyTodos.HUD_HEADER_TEXT[2],
-                 MyTodos.HUD_HEADER_TEXT[3], MyTodos.HUD_HEADER_TEXT[4])
-    renderText(textLeft, panelTop - padY, titleSize, titleText)
-    setTextBold(false)
+    if showHeader then
+        setTextBold(true)
+        setTextColor(MyTodos.HUD_HEADER_TEXT[1], MyTodos.HUD_HEADER_TEXT[2],
+                     MyTodos.HUD_HEADER_TEXT[3], MyTodos.HUD_HEADER_TEXT[4])
+        renderText(textLeft, panelTop - padY, titleSize, titleText)
+        setTextBold(false)
+    end
 
     local y = panelTop - headerH - padY
     for _, row in ipairs(rows) do
@@ -824,8 +970,11 @@ function MyTodos:loadSettings()
         if typ == "bool" then
             local v = getXMLBool(xmlFile, p)
             if v ~= nil then self.settings[def.key] = v end
-        elseif typ == "percent" then
+        elseif typ == "percent" or typ == "count" then
             local v = getXMLInt(xmlFile, p)
+            if v ~= nil then self.settings[def.key] = v end
+        elseif typ == "select" then
+            local v = getXMLFloat(xmlFile, p)
             if v ~= nil then self.settings[def.key] = v end
         end
     end
@@ -873,8 +1022,12 @@ function MyTodos:saveSettings()
         local typ = def.type or "bool"
         if typ == "bool" then
             setXMLBool(xmlFile, p, self.settings[def.key] and true or false)
-        elseif typ == "percent" then
-            setXMLInt(xmlFile, p, self.settings[def.key] or def.default or MyTodos.PERCENT_MIN)
+        elseif typ == "percent" or typ == "count" then
+            setXMLInt(xmlFile, p,
+                math.floor(tonumber(self.settings[def.key]) or def.default or 0))
+        elseif typ == "select" then
+            setXMLFloat(xmlFile, p,
+                tonumber(self.settings[def.key]) or def.default or 0)
         end
     end
 

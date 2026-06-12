@@ -4,6 +4,7 @@
         <!-- Action bindings (engine displays these in the keybinding menu) -->
         <text name="input_MYTODOS_TOGGLE_SETTINGS"  text="MyTodos : ouvrir/fermer les paramètres"/>
         <text name="input_MYTODOS_TOGGLE_HUD"       text="MyTodos : afficher/masquer le HUD"/>
+        <text name="input_MYTODOS_TOGGLE_OVERVIEW"  text="MyTodos : afficher/masquer la vue d'ensemble des tâches"/>
 
         <!-- HUD -->
         <text name="myTodos_hud_title"              text="MyTodos"/>
@@ -13,12 +14,19 @@
         <text name="myTodos_hud_field_row"          text="C%s  %s"/>
         <text name="myTodos_section_fields"         text="Champs"/>
         <text name="myTodos_section_animals"        text="Animaux"/>
+        <text name="myTodos_overview_title"         text="MyTodos - Toutes les tâches"/>
+        <text name="myTodos_overview_col_name"      text="Champ / Animaux"/>
+        <text name="myTodos_overview_col_task"      text="Tâche"/>
+        <text name="myTodos_overview_col_extra"     text="En plus"/>
 
         <!-- Settings menu -->
         <text name="myTodos_page_general"           text="Général"/>
         <text name="myTodos_page_husbandry"         text="Animaux"/>
         <text name="myTodos_page_fields"            text="Champs"/>
         <text name="myTodos_setting_hudVisible"            text="Afficher le HUD"/>
+        <text name="myTodos_setting_hudShowHeader"         text="Afficher la barre de titre"/>
+        <text name="myTodos_setting_maxFieldLines"         text="Max. lignes champs"/>
+        <text name="myTodos_setting_maxHusbLines"          text="Max. lignes animaux"/>
         <text name="myTodos_setting_foodThreshold"         text="Nourriture sous"/>
         <text name="myTodos_setting_waterThreshold"        text="Eau sous"/>
         <text name="myTodos_setting_strawThreshold"        text="Paille sous"/>
@@ -26,6 +34,9 @@
         <text name="myTodos_setting_manureThreshold"       text="Fumier au-dessus"/>
         <text name="myTodos_setting_liquidManureThreshold" text="Lisier au-dessus"/>
         <text name="myTodos_setting_milkThreshold"         text="Lait au-dessus"/>
+        <text name="myTodos_setting_windrowThreshold"      text="Andains à partir de"/>
+        <text name="myTodos_setting_stonesThreshold"       text="Pierres à partir de"/>
+        <text name="myTodos_setting_weedThreshold"         text="Mauvaises herbes à partir de"/>
         <text name="myTodos_settings_field_label"   text="Champ %s"/>
 
         <!-- Task: vanilla -->

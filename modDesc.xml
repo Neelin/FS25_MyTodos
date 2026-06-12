@@ -13,6 +13,7 @@
 Hotkeys (keyboard, rebindable under Options > Controls):
 - Alt + M: open/close the settings menu
 - Right Shift + T: show/hide the HUD
+- Right Shift + O: show/hide the full task overview (all fields and animals)
 
 GitHub: https://github.com/Neelin/FS25_MyTodos]]></en>
         <de><![CDATA[Dauerhaft sichtbares HUD mit den als nächstes anstehenden Aufgaben auf deinen Feldern und bei deinen Tieren.
@@ -20,6 +21,7 @@ GitHub: https://github.com/Neelin/FS25_MyTodos]]></en>
 Tastenkürzel (Tastatur, in Optionen > Steuerung änderbar):
 - Alt + M: Einstellungsmenü öffnen/schließen
 - Rechte Umschalt + T: HUD ein-/ausblenden
+- Rechte Umschalt + O: Komplettübersicht aller Aufgaben ein-/ausblenden
 
 GitHub: https://github.com/Neelin/FS25_MyTodos]]></de>
         <fr><![CDATA[HUD toujours visible affichant les prochaines tâches à effectuer sur vos champs et dans vos élevages.
@@ -27,6 +29,7 @@ GitHub: https://github.com/Neelin/FS25_MyTodos]]></de>
 Raccourcis clavier (clavier, modifiables dans Options > Commandes) :
 - Alt + M : ouvrir/fermer le menu des paramètres
 - Maj droite + T : afficher/masquer le HUD
+- Maj droite + O : afficher/masquer la vue d'ensemble de toutes les tâches
 
 GitHub : https://github.com/Neelin/FS25_MyTodos]]></fr>
         <it><![CDATA[HUD sempre visibile che mostra le prossime attività da svolgere sui tuoi campi e nei tuoi allevamenti.
@@ -34,6 +37,7 @@ GitHub : https://github.com/Neelin/FS25_MyTodos]]></fr>
 Tasti di scelta rapida (tastiera, modificabili in Opzioni > Comandi):
 - Alt + M: apri/chiudi il menu impostazioni
 - Maiusc destro + T: mostra/nascondi l'HUD
+- Maiusc destro + O: mostra/nascondi la panoramica completa delle attività
 
 GitHub: https://github.com/Neelin/FS25_MyTodos]]></it>
     </description>
@@ -56,11 +60,13 @@ GitHub: https://github.com/Neelin/FS25_MyTodos]]></it>
         <sourceFile filename="scripts/gui/pages/MyTodosBasePage.lua"/>
         <sourceFile filename="scripts/gui/pages/MyTodosGeneralPage.lua"/>
         <sourceFile filename="scripts/gui/MyTodosSettingsMenu.lua"/>
+        <sourceFile filename="scripts/gui/MyTodosOverviewDialog.lua"/>
     </extraSourceFiles>
 
     <actions>
         <action name="MYTODOS_TOGGLE_SETTINGS"/>
         <action name="MYTODOS_TOGGLE_HUD"/>
+        <action name="MYTODOS_TOGGLE_OVERVIEW"/>
     </actions>
 
     <inputBinding>
@@ -69,6 +75,9 @@ GitHub: https://github.com/Neelin/FS25_MyTodos]]></it>
         </actionBinding>
         <actionBinding action="MYTODOS_TOGGLE_HUD">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_rshift KEY_t"/>
+        </actionBinding>
+        <actionBinding action="MYTODOS_TOGGLE_OVERVIEW">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_rshift KEY_o"/>
         </actionBinding>
     </inputBinding>
 </modDesc>

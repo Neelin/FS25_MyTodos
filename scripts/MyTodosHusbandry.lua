@@ -752,7 +752,9 @@ function MyTodos:_foodFillTypeRatio(food, fillTypeIdx)
     return lvl / cap
 end
 
--- Liefert task-string fuer eine Husbandry, oder nil wenn nichts ansteht.
+-- Liefert task-string, Tier-Anzahl und parts-Liste fuer eine Husbandry --
+-- oder nil wenn nichts ansteht. Anzahl + parts braucht die Komplett-
+-- uebersicht fuer ihre Tabellenspalten.
 function MyTodos:deriveHusbandryTask(entry)
     local p = entry.placeable
     local parts = {}
@@ -900,14 +902,11 @@ function MyTodos:deriveHusbandryTask(entry)
 
     if #parts == 0 then return nil end
 
+    -- n ist hier immer > 0 (Stall ohne Tiere returned oben frueh).
     local n = self:_husbandryNumAnimals(p)
-    local heading
-    if n > 0 then
-        heading = string.format("%s (%d)", entry.name, n)
-    else
-        heading = entry.name
-    end
-    return string.format("%s - %s", heading, table.concat(parts, ", "))
+    local heading = string.format("%s (%d)", entry.name, n)
+    local task = string.format("%s - %s", heading, table.concat(parts, ", "))
+    return task, n, parts
 end
 
 function MyTodos:scanHusbandries(verbose)
@@ -919,9 +918,10 @@ function MyTodos:scanHusbandries(verbose)
     self.husbandryOwnedCount = #owned
 
     for _, entry in ipairs(owned) do
-        local task = self:deriveHusbandryTask(entry)
+        local task, numAnimals, parts = self:deriveHusbandryTask(entry)
         if task ~= nil then
             table.insert(self.husbandryTasks, { name = entry.name, task = task,
+                numAnimals = numAnimals, parts = parts,
                 iconFile = self:_animalIconFile(entry.placeable) })
         end
     end

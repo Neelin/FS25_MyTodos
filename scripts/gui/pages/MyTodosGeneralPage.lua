@@ -4,9 +4,10 @@
 -- Seit 31.05.2026 die EINZIGE Settings-Page. Frueher gab es drei Tabs
 -- (General / Husbandry / Fields); jetzt liegt alles auf EINEM Tab
 -- (Zahnrad-Icon), gruppiert unter drei Section-Headern:
---   1. Allgemein  (HUD-Toggle, SETTING_DEFS mit page=="general")
+--   1. Allgemein  (HUD-/Header-Toggle, Zeilen-Budgets; page=="general")
 --   2. Tiere      (Schwellwerte, SETTING_DEFS mit page=="husbandry")
---   3. Felder     (dynamische Sichtbarkeits-Toggles pro eigenem Feld)
+--   3. Felder     (Sampler-Schwellwerte page=="fields" + dynamische
+--                  Sichtbarkeits-Toggles pro eigenem Feld)
 --
 -- Klasse/XML heissen aus Kompatibilitaetsgruenden weiter "...General..."
 -- (Umbenennen waere reines Bruch-Risiko ohne Mehrwert -- Frame-Name,
@@ -86,14 +87,20 @@ function MyTodosGeneralPage:rebuild()
     U.populateSettingsList(collectDefs("husbandry"), self.layout, self.prefabs,
         MyTodos.settings, onChange)
 
-    -- 3. Felder (Section-Header nur wenn es ueberhaupt eigene Felder gibt)
+    -- 3. Felder: erst die Sampler-Schwellwerte (SETTING_DEFS page=="fields"),
+    -- dann die dynamischen Sichtbarkeits-Toggles pro eigenem Feld.
+    local fieldDefs = collectDefs("fields")
     local fieldItems = buildFieldItems()
-    if #fieldItems > 0 then
+    if #fieldDefs > 0 or #fieldItems > 0 then
         U.addSectionHeader(MyTodos:t("myTodos_page_fields"),
             self.layout, self.prefabs.section)
-        U.populateToggleList(fieldItems, self.layout, self.prefabs,
-            function (item, checked)
-                MyTodos:setFieldIgnored(item.fieldId, not checked)
-            end)
+        U.populateSettingsList(fieldDefs, self.layout, self.prefabs,
+            MyTodos.settings, onChange)
+        if #fieldItems > 0 then
+            U.populateToggleList(fieldItems, self.layout, self.prefabs,
+                function (item, checked)
+                    MyTodos:setFieldIgnored(item.fieldId, not checked)
+                end)
+        end
     end
 end

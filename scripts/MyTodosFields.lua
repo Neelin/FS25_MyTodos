@@ -25,7 +25,10 @@ MyTodos.WINDROW_TYPES = {
 }
 
 -- Mindestens so viele Pixel muessen ein bestimmten Schwadtyp haben, sonst
--- wird's als vernachlaessigbarer Rest behandelt.
+-- wird's als vernachlaessigbarer Rest behandelt. Die *_MIN_FRACTION- und
+-- WEED_TOTAL_MIN_FACTOR-Werte hier sind nur noch DEFAULTS -- der Spieler
+-- kann sie via Settings (Alt+M, Sektion "Felder": windrow/stones/
+-- weedThreshold) uebersteuern; die Pixel-Floors bleiben immer aktiv.
 MyTodos.WINDROW_MIN_PIXELS = 50
 MyTodos.WINDROW_MIN_FRACTION = 0.005  -- 0.5% der Feldflaeche
 
@@ -218,6 +221,15 @@ function MyTodos:applyFieldPolygon(mod, field)
     end
 end
 
+-- Prozent-Setting -> Bruchteil [0..1]. defaultPct greift solange das
+-- Setting fehlt oder kein numerischer Wert ist. Genutzt von den Sampler-
+-- Schwellen (windrow/stones/weedThreshold, Settings-Sektion "Felder").
+function MyTodos:_settingFraction(key, defaultPct)
+    local v = self.settings and tonumber(self.settings[key])
+    if v == nil then v = defaultPct end
+    return v / 100
+end
+
 -- Windrow-Sampler --------------------------------------------------
 
 function MyTodos:initWindrowSampler()
@@ -301,16 +313,22 @@ function MyTodos:sampleWindrowsForField(field)
 
     local threshold = math.max(
         MyTodos.WINDROW_MIN_PIXELS,
-        math.floor(hTotalArea * MyTodos.WINDROW_MIN_FRACTION)
+        math.floor(hTotalArea * self:_settingFraction("windrowThreshold",
+            MyTodos.WINDROW_MIN_FRACTION * 100))
     )
     if hArea < threshold then
         return {}
     end
 
-    -- Schritt 2: welche Type(n) sind ueber Threshold?
+    -- Schritt 2: welche Type(n) sind ueber Threshold? Type- UND Height-
+    -- Filter zusammen (executeGet AND-verknuepft mehrere Filter): nach dem
+    -- Aufnehmen bleiben Type-Restpixel mit Height 0 zurueck, die sonst als
+    -- false positive durchkommen sobald irgendein anderer Schwad das
+    -- Height-Gate in Schritt 1 passiert.
     local labels = {}
     for _, w in ipairs(self.windrowFilters) do
-        local ok, _, area, _ = pcall(self.windrowMod.executeGet, self.windrowMod, w.filter)
+        local ok, _, area, _ = pcall(self.windrowMod.executeGet, self.windrowMod,
+            w.filter, self.windrowHeightFilter)
         if ok and (area or 0) >= threshold then
             table.insert(labels, w.label)
         end
@@ -366,7 +384,8 @@ function MyTodos:fieldHasStones(field)
     local _, _, totalArea = self.stoneMod:executeGet()
     local threshold = math.max(
         MyTodos.STONE_MIN_PIXELS,
-        math.floor((totalArea or 0) * MyTodos.STONE_MIN_FRACTION)
+        math.floor((totalArea or 0) * self:_settingFraction("stonesThreshold",
+            MyTodos.STONE_MIN_FRACTION * 100))
     )
 
     local stoneArea = 0
@@ -428,8 +447,10 @@ function MyTodos:initWeedSampler()
     return true
 end
 
--- Liefert {state, factor} fuer das hoechste actionable Stadium (1..6) auf
--- diesem Feld, oder nil wenn nichts ueber Threshold liegt.
+-- Liefert {state, factor} fuer das relevanteste actionable Stadium (1..6)
+-- auf diesem Feld, oder nil wenn nichts ueber Threshold liegt. Grossunkraut
+-- (state 5) hat Vorrang vor allen "klein"-Stufen -- state 6 ("klein dicht")
+-- ist numerisch hoeher, agronomisch aber kleiner.
 function MyTodos:sampleWeedForField(field, fieldId)
     if not self:initWeedSampler() then return nil end
     if type(field.polygonPoints) ~= "table" or #field.polygonPoints == 0 then
@@ -447,19 +468,27 @@ function MyTodos:sampleWeedForField(field, fieldId)
     )
 
     local highestState = 0
+    local hasLarge = false
     local weightedSum = 0
     for state = 1, 6 do
         local _, area, _ = self.weedMod:executeGet(self.weedFilters[state])
         local count = area or 0
-        if count >= threshold and state > highestState then
-            highestState = state
+        if count >= threshold then
+            if state == 5 then hasLarge = true end
+            if state > highestState then highestState = state end
         end
         local f = self.weedFactors[state] or 0
         weightedSum = weightedSum + count * f
     end
     if highestState == 0 then return nil end
+    -- Gemischter Befall (5 und 6 beide ueber Schwelle): "gross" melden,
+    -- das bekommt nur noch die Spritze weg.
+    if hasLarge then highestState = 5 end
     local factor = weightedSum / totalArea
-    if factor < MyTodos.WEED_TOTAL_MIN_FACTOR then return nil end
+    if factor < self:_settingFraction("weedThreshold",
+            MyTodos.WEED_TOTAL_MIN_FACTOR * 100) then
+        return nil
+    end
     return { state = highestState, factor = factor }
 end
 
@@ -504,7 +533,11 @@ function MyTodos:findPfPHMap()
 end
 
 -- Liefert true wenn PF in dieser Welt tatsaechlich aktiv ist (= ein
--- PF-Sprayer existiert von dem wir pHMap holen koennen).
+-- PF-Sprayer existiert von dem wir pHMap holen koennen). Achtung: im
+-- Negativ-Fall scannt findPfPHMap jedes Mal die komplette Fahrzeugliste
+-- (Negativ-Ergebnis wird bewusst nicht gecached, siehe dort). In der
+-- Task-Derivation deshalb self.precisionFarming == "active" pruefen --
+-- das aktualisiert scanFields einmal pro Scan-Tick.
 function MyTodos:isPfActive()
     return self:findPfPHMap() ~= nil
 end
@@ -690,7 +723,7 @@ end
 -- Bodentypen unter SOIL_MIN_FRACTION/SOIL_MIN_PIXELS Anteil werden
 -- ignoriert (Rand-Pixel anderer Bodenarten).
 function MyTodos:limeTaskPf(field)
-    if not self:isPfActive() then return nil end
+    if self.precisionFarming ~= "active" then return nil end
     local perSoil = self:samplePhPerSoil(field)
     if perSoil == nil then return nil end
     local totalPx = 0
@@ -855,7 +888,7 @@ end
 -- nitrogenMap.fruitTypeIndexToFruitRequirement[fruit].bySoilType[soil].
 -- Reportet wird der Boden mit der GROESSTEN Luecke.
 function MyTodos:fertilizerTaskPf(field, fs, fruit)
-    if not self:isPfActive() then return nil end
+    if self.precisionFarming ~= "active" then return nil end
     if fruit == nil or fruit.regrows then return nil end
     local perSoil = self:sampleNPerSoil(field)
     if perSoil == nil then return nil end
@@ -935,9 +968,14 @@ end
 
 -- Task derivation --------------------------------------------------
 
+-- Returns: task (fertig formatierter HUD-String), primary, parallel-Liste.
+-- primary/parallel braucht die Komplettuebersicht fuer ihre Tabellenspalten.
 function MyTodos:deriveFieldTask(field, fieldId)
     local fs = field.fieldState
-    if fs == nil then return self:t("myTodos_task_no_fieldstate") end
+    if fs == nil then
+        local label = self:t("myTodos_task_no_fieldstate")
+        return label, label, {}
+    end
     return self:deriveTaskVanilla(fs, fieldId, field)
 end
 
@@ -955,10 +993,13 @@ function MyTodos:deriveTaskVanilla(fs, fieldId, field)
         return nil
     end
 
+    local task
     if #parallel == 0 then
-        return primary
+        task = primary
+    else
+        task = string.format("%s  [+ %s]", primary, table.concat(parallel, ", "))
     end
-    return string.format("%s  [+ %s]", primary, table.concat(parallel, ", "))
+    return task, primary, parallel
 end
 
 function MyTodos:isPlowingRequired()
@@ -1160,7 +1201,7 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
         -- unter PF ist sprayLevel zwar weiterhin vorhanden, aber die
         -- relevante Information sitzt in der N-Map.
         if stillGrowing and not fruit.regrows then
-            if self:isPfActive() then
+            if self.precisionFarming == "active" then
                 local pfTask = self:fertilizerTaskPf(field, fs, fruit)
                 if pfTask ~= nil then
                     table.insert(out, pfTask)
@@ -1199,7 +1240,7 @@ function MyTodos:deriveParallelVanilla(fs, fruit, fieldId, field)
     -- denn vanilla limeLevel hat unter PF andere Semantik.
     local limeBenefits = (fruit == nil) or (fruit.consumesLime ~= false)
     if limeBenefits then
-        if self:isPfActive() then
+        if self.precisionFarming == "active" then
             local pfTask = self:limeTaskPf(field)
             if pfTask ~= nil then
                 table.insert(out, pfTask)

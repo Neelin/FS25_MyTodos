@@ -14,4 +14,54 @@
     <Profile name="myTodos_settingsTitle" extends="fs25_settingsMultiTextOptionTitle">
         <position value="-500px 0px" />
     </Profile>
+
+    <!-- Profile fuer den Komplettuebersicht-Dialog (OverviewDialog.xml).
+         Aufbau/Farben nach FS25_FarmlandOverview's FarmlandDlg*-Profilen;
+         die $preset_fs25_*-Presets kommen aus dem Vanilla-Spiel. -->
+    <Profile name="myTodos_dlgPanel" extends="emptyPanel" with="anchorStretchingYLeft pivotTopLeft">
+    </Profile>
+
+    <Profile name="myTodos_dlgHeaderText" extends="baseReference">
+        <imageColor value="0 0 0 0" />
+        <textSize value="16px" />
+        <textBold value="true" />
+        <textUpperCase value="true" />
+        <textColor value="$preset_colorWhite_50" />
+        <textAlignment value="left" />
+        <textDisabledColor value="$preset_colorDisabled" />
+    </Profile>
+
+    <Profile name="myTodos_dlgListItem" extends="baseReference" with="anchorTopStretchingX alternating">
+        <height value="40px"/>
+        <imageColor value="$preset_fs25_colorGrey" />
+        <imageSelectedColor value="$preset_fs25_colorMainHighlight" />
+        <alternateBackgroundColor value="$preset_fs25_colorGreyDark_50" />
+    </Profile>
+
+    <Profile name="myTodos_dlgSectionItem" extends="baseReference" with="anchorTopStretchingX">
+        <height value="40px"/>
+        <imageColor value="0 0 0 0" />
+    </Profile>
+
+    <Profile name="myTodos_dlgSectionTitle" extends="baseReference" with="anchorStretchingYLeft">
+        <textSize value="16px" />
+        <textBold value="true" />
+        <textUpperCase value="true" />
+        <textColor value="$preset_colorWhite_50" />
+        <textAlignment value="left" />
+    </Profile>
+
+    <Profile name="myTodos_dlgCell" extends="baseReference" with="anchorStretchingYLeft">
+        <textBold value="false" />
+        <textSize value="15px" />
+        <textAlignment value="left" />
+        <textColor value="$preset_fs25_colorMainLight" />
+        <textSelectedColor value="$preset_fs25_colorMainDark" />
+        <textDisabledColor value="$preset_colorDisabled" />
+    </Profile>
+
+    <Profile name="myTodos_dlgCellImage" extends="baseReference" with="anchorMiddleLeft">
+        <size value="24px 24px" />
+        <imageSliceId value="noSlice" />
+    </Profile>
 </GUIProfiles>

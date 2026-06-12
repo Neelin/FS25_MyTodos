@@ -4,6 +4,7 @@
         <!-- Action-Bindings (vom Spiel im Einstellungen-Menue erwartet) -->
         <text name="input_MYTODOS_TOGGLE_SETTINGS"  text="MyTodos: Einstellungen oeffnen/schliessen"/>
         <text name="input_MYTODOS_TOGGLE_HUD"       text="MyTodos: HUD ein-/ausblenden"/>
+        <text name="input_MYTODOS_TOGGLE_OVERVIEW"  text="MyTodos: Komplettuebersicht ein-/ausblenden"/>
 
         <!-- HUD -->
         <text name="myTodos_hud_title"              text="MyTodos"/>
@@ -13,12 +14,19 @@
         <text name="myTodos_hud_field_row"          text="F%s  %s"/>
         <text name="myTodos_section_fields"         text="Felder"/>
         <text name="myTodos_section_animals"        text="Tiere"/>
+        <text name="myTodos_overview_title"         text="MyTodos - Alle Aufgaben"/>
+        <text name="myTodos_overview_col_name"      text="Feld / Tiere"/>
+        <text name="myTodos_overview_col_task"      text="Aufgabe"/>
+        <text name="myTodos_overview_col_extra"     text="Zusätzlich"/>
 
         <!-- Settings menu -->
         <text name="myTodos_page_general"           text="Allgemein"/>
         <text name="myTodos_page_husbandry"         text="Tiere"/>
         <text name="myTodos_page_fields"            text="Felder"/>
         <text name="myTodos_setting_hudVisible"            text="HUD anzeigen"/>
+        <text name="myTodos_setting_hudShowHeader"         text="Titelleiste anzeigen"/>
+        <text name="myTodos_setting_maxFieldLines"         text="Max. Zeilen Felder"/>
+        <text name="myTodos_setting_maxHusbLines"          text="Max. Zeilen Tiere"/>
         <text name="myTodos_setting_foodThreshold"         text="Futter unter"/>
         <text name="myTodos_setting_waterThreshold"        text="Wasser unter"/>
         <text name="myTodos_setting_strawThreshold"        text="Stroh unter"/>
@@ -26,6 +34,9 @@
         <text name="myTodos_setting_manureThreshold"       text="Mist ueber"/>
         <text name="myTodos_setting_liquidManureThreshold" text="Guelle ueber"/>
         <text name="myTodos_setting_milkThreshold"         text="Milch ueber"/>
+        <text name="myTodos_setting_windrowThreshold"      text="Schwad anzeigen ab"/>
+        <text name="myTodos_setting_stonesThreshold"       text="Steine anzeigen ab"/>
+        <text name="myTodos_setting_weedThreshold"         text="Unkraut anzeigen ab"/>
         <text name="myTodos_settings_field_label"   text="Feld %s"/>
 
         <!-- Task: vanilla -->

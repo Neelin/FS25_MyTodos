@@ -4,6 +4,7 @@
         <!-- Action bindings (engine displays these in the keybinding menu) -->
         <text name="input_MYTODOS_TOGGLE_SETTINGS"  text="MyTodos: Toggle settings panel"/>
         <text name="input_MYTODOS_TOGGLE_HUD"       text="MyTodos: Toggle HUD"/>
+        <text name="input_MYTODOS_TOGGLE_OVERVIEW"  text="MyTodos: Toggle full task overview"/>
 
         <!-- HUD -->
         <text name="myTodos_hud_title"              text="MyTodos"/>
@@ -13,12 +14,19 @@
         <text name="myTodos_hud_field_row"          text="F%s  %s"/>
         <text name="myTodos_section_fields"         text="Fields"/>
         <text name="myTodos_section_animals"        text="Animals"/>
+        <text name="myTodos_overview_title"         text="MyTodos - All tasks"/>
+        <text name="myTodos_overview_col_name"      text="Field / Animals"/>
+        <text name="myTodos_overview_col_task"      text="Task"/>
+        <text name="myTodos_overview_col_extra"     text="Additional"/>
 
         <!-- Settings menu -->
         <text name="myTodos_page_general"           text="General"/>
         <text name="myTodos_page_husbandry"         text="Animals"/>
         <text name="myTodos_page_fields"            text="Fields"/>
         <text name="myTodos_setting_hudVisible"            text="Show HUD"/>
+        <text name="myTodos_setting_hudShowHeader"         text="Show title bar"/>
+        <text name="myTodos_setting_maxFieldLines"         text="Max. field rows"/>
+        <text name="myTodos_setting_maxHusbLines"          text="Max. animal rows"/>
         <text name="myTodos_setting_foodThreshold"         text="Food below"/>
         <text name="myTodos_setting_waterThreshold"        text="Water below"/>
         <text name="myTodos_setting_strawThreshold"        text="Straw below"/>
@@ -26,6 +34,9 @@
         <text name="myTodos_setting_manureThreshold"       text="Manure above"/>
         <text name="myTodos_setting_liquidManureThreshold" text="Slurry above"/>
         <text name="myTodos_setting_milkThreshold"         text="Milk above"/>
+        <text name="myTodos_setting_windrowThreshold"      text="Show windrows from"/>
+        <text name="myTodos_setting_stonesThreshold"       text="Show stones from"/>
+        <text name="myTodos_setting_weedThreshold"         text="Show weeds from"/>
         <text name="myTodos_settings_field_label"   text="Field %s"/>
 
         <!-- Task: vanilla -->
