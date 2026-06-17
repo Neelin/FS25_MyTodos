@@ -979,6 +979,14 @@ function MyTodos:deriveFieldTask(field, fieldId)
         local label = self:t("myTodos_task_no_fieldstate")
         return label, label, {}, true
     end
+    -- Mehrjaehrige Kulturen (Trauben/Oliven) behandelt das Perennial-Subsystem
+    -- (MyTodosPaddies:scanPaddies) per Density-Sampling pro Kultur -- das
+    -- fieldState-Aggregat ist dafuer unbrauchbar (nur EINE Frucht sichtbar,
+    -- growthState=0 bei gemischtem Feld). Hier ueberspringen, damit kein Doppel
+    -- und keine Ableitung aus dem kaputten Aggregat.
+    if self:_isPerennialFieldCrop(fs.fruitTypeIndex or 0) then
+        return nil
+    end
     return self:deriveTaskVanilla(fs, fieldId, field)
 end
 

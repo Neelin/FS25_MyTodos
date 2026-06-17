@@ -234,6 +234,9 @@ function MyTodos:resetPerMapCaches()
     self._pfPHMapCached = nil
     self._pfNMapCached = nil
     self.precisionFarming = nil
+    -- Paddies/Perennials (MyTodosPaddies.lua): Crop-Index-Cache, da
+    -- FruitType-Indizes map-spezifisch sind.
+    self._paddyCropsCache = nil
     -- Husbandry (MyTodosHusbandry.lua)
     self._tmrFillTypeIdxCached = nil
     -- HUD-Overlays: Engine-Handles explizit freigeben, nicht nur vergessen

@@ -28,6 +28,10 @@ MyTodos.PADDY_MIN_GRID_POINTS = 6      -- absolute Mindest-Trefferzahl je Kultur
 MyTodos.PADDY_MIN_FRACTION = 0.05      -- bzw. 5% der Grundstuecks-Sample-Punkte
 MyTodos.PADDY_FIELDTYPE_MIN_AREA = 200 -- Pixel rice-Boden fuer "leere Paddy"-Task
 MyTodos.PADDY_GRID_MAX = 24            -- max NxN Sample-Punkte je Grundstueck
+-- Reihen-Kulturen (Trauben/Oliven): dichter sampeln (Reben stehen in schmalen
+-- Reihen mit Luecken) und Ernte ueber Pixel-ANWESENHEIT statt dominanter Stufe.
+MyTodos.PERENNIAL_GRID_MAX = 36
+MyTodos.PERENNIAL_HARVEST_MIN_POINTS = 5
 
 -- Aufloesung der Kultur-Namen -> { [fruitIndex] = {index, name, fruit, sowable} }.
 function MyTodos:_resolvePaddyCrops()
@@ -128,24 +132,29 @@ end
 
 -- Grid-Sampling der Fruchtflaeche eines Grundstuecks. Nur Punkte die wirklich
 -- auf DIESEM Grundstueck liegen werden gezaehlt (bbox kann Nachbarn ueber-
--- lappen). Liefert detected = { {cropIndex, growth}, ... } -- pro Kultur ueber
--- Schwelle mit ihrer dominanten Growth-Stufe.
-function MyTodos:samplePaddyCrops(plot, crops)
+-- lappen). growthState 0 wird IGNORIERT -- das ist "keine Foliage an diesem
+-- Pixel" (zwischen Reben-Reihen bei Trauben/Oliven, oder kahler Boden), sonst
+-- dominiert bei Reihen-Kulturen die Luecke.
+-- Liefert: detected = {{cropIndex, growth(dominant nonzero)}, ...} (Kulturen
+-- ueber Flaechen-Schwelle), tally = {[cropIndex]={[growth]=count}} (roh, >0),
+-- onPlot = Anzahl Sample-Punkte auf dem Grundstueck.
+-- gridMax optional (Default PADDY_GRID_MAX) -- Reihen-Kulturen brauchen dichter.
+function MyTodos:samplePaddyCrops(plot, crops, gridMax)
     if FSDensityMapUtil == nil
             or type(FSDensityMapUtil.getFruitTypeIndexAtWorldPos) ~= "function" then
-        return {}
+        return {}, {}, 0
     end
     local bb = plot.bbox
     local fid = plot.farmlandId
     local spanX, spanZ = bb.maxX - bb.minX, bb.maxZ - bb.minZ
     local maxDim = math.max(spanX, spanZ, 1)
-    local step = math.max(4, maxDim / MyTodos.PADDY_GRID_MAX)
+    local step = math.max(2, maxDim / (gridMax or MyTodos.PADDY_GRID_MAX))
 
     local canFarmland = g_farmlandManager ~= nil
         and type(g_farmlandManager.getFarmlandIdAtWorldPosition) == "function"
 
     local tally = {}     -- cropIndex -> { [growth]=count }
-    local cropHits = {}  -- cropIndex -> total count
+    local cropHits = {}  -- cropIndex -> total count (growth > 0)
     local onPlot = 0
 
     local x = bb.minX
@@ -163,9 +172,11 @@ function MyTodos:samplePaddyCrops(plot, crops)
                 local ok, fi, gs = pcall(FSDensityMapUtil.getFruitTypeIndexAtWorldPos, x, z)
                 if ok and type(fi) == "number" and crops[fi] ~= nil then
                     local g = gs or 0
-                    tally[fi] = tally[fi] or {}
-                    tally[fi][g] = (tally[fi][g] or 0) + 1
-                    cropHits[fi] = (cropHits[fi] or 0) + 1
+                    if g > 0 then
+                        tally[fi] = tally[fi] or {}
+                        tally[fi][g] = (tally[fi][g] or 0) + 1
+                        cropHits[fi] = (cropHits[fi] or 0) + 1
+                    end
                 end
             end
             z = z + step
@@ -185,7 +196,7 @@ function MyTodos:samplePaddyCrops(plot, crops)
             table.insert(detected, { cropIndex = ci, growth = bestG })
         end
     end
-    return detected
+    return detected, tally, onPlot
 end
 
 -- Task pro erkannter Kultur. Wiederverwendet die l10n-Keys der Field-Logik.
@@ -216,6 +227,45 @@ function MyTodos:derivePaddyTask(crop, growth)
     return nil
 end
 
+-- Crop-Aufloesung gecacht (FruitType-Indizes sind pro Session stabil). Wird
+-- haeufig aufgerufen (pro Feld in deriveFieldTask) -> nicht jedes Mal neu
+-- per Name aufloesen. Cache erst setzen wenn g_fruitTypeManager Ergebnisse
+-- liefert (sonst frueh ein leerer Cache).
+function MyTodos:_paddyCropsCached()
+    if self._paddyCropsCache ~= nil then return self._paddyCropsCache end
+    local c = self:_resolvePaddyCrops()
+    if next(c) ~= nil then self._paddyCropsCache = c end
+    return c
+end
+
+-- Ist diese Frucht eine mehrjaehrige Kultur, die das Perennial-Subsystem auf
+-- ECHTEN Feldern per Density-Sampling behandelt (Trauben/Oliven)? Erkennung:
+-- in unserer Crop-Liste UND nicht saebar (isCultivationAllowed=false). Reis
+-- (saebar) und andere non-cultivatable Fruechte (z.B. Pappel) bleiben beim
+-- normalen Aggregat-Pfad.
+function MyTodos:_isPerennialFieldCrop(fruitIndex)
+    if type(fruitIndex) ~= "number" or fruitIndex <= 0 then return false end
+    local c = self:_paddyCropsCached()[fruitIndex]
+    return c ~= nil and c.sowable == false
+end
+
+-- bbox {minX,minZ,maxX,maxZ} aus den Feld-Polygon-Knoten (Engine-Node-IDs ->
+-- Weltkoords). Nil wenn kein Polygon.
+function MyTodos:_fieldBBox(field)
+    local pp = field.polygonPoints
+    if type(pp) ~= "table" or #pp == 0 then return nil end
+    local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+    for _, nodeId in ipairs(pp) do
+        local x, _, z = getWorldTranslation(nodeId)
+        if x < minX then minX = x end
+        if x > maxX then maxX = x end
+        if z < minZ then minZ = z end
+        if z > maxZ then maxZ = z end
+    end
+    if minX > maxX then return nil end
+    return { minX = minX, maxX = maxX, minZ = minZ, maxZ = maxZ }
+end
+
 -- Scan-Einstieg. Liefert eine Liste von HUD-Eintraegen im selben Schema wie
 -- scanFields ({fieldId, task, primary, parallel, actionable, iconFile}).
 -- Wird aus scanFields aufgerufen und in self.fieldTasks gemerged.
@@ -224,7 +274,7 @@ function MyTodos:scanPaddies(verbose)
     local out = {}
     if self.farmId == nil then return out end
 
-    local crops = self:_resolvePaddyCrops()
+    local crops = self:_paddyCropsCached()
     if next(crops) == nil then return out end
     local riceIndex = nil
     for ci, c in pairs(crops) do
@@ -281,11 +331,91 @@ function MyTodos:scanPaddies(verbose)
 
     self.paddyOwnedCount = realPaddies
     self.paddyPlotIds = plotIds
+
+    -- Mehrjaehrige Kulturen (Trauben/Oliven) auf ECHTEN Feldern. Das fieldState-
+    -- Aggregat ist hier unbrauchbar (sieht nur EINE Frucht, growthState=0 bei
+    -- gemischtem/mehrjaehrigem Feld), deshalb sampeln wir das Feld-Polygon multi-
+    -- frucht (wie die Paddies) und leiten NUR Ernte-Tasks ab (v2-Scope). Diese
+    -- Felder werden im normalen Pfad uebersprungen (deriveFieldTask, perennial-
+    -- check) -> kein Doppel. Ignore + Settings-Liste laufen schon ueber den
+    -- normalen Field-Pfad (es sind echte Felder).
+    local perennialFields = 0
+    if g_fieldManager ~= nil and g_farmlandManager ~= nil then
+        for _, field in pairs(g_fieldManager:getFields()) do
+            local fs = field.fieldState
+            local fl = field.farmland
+            if fs ~= nil and fl ~= nil and fl.id ~= nil
+                    and self:_isPerennialFieldCrop(fs.fruitTypeIndex or 0)
+                    and g_farmlandManager:getFarmlandOwner(fl.id) == self.farmId then
+                -- Anzeige-Nummer wie collectOwnedFields: farmland.name -> id.
+                local fid
+                local fname = fl.name
+                if type(fname) == "string" and fname ~= "" then
+                    fid = tonumber(fname) or fname
+                end
+                if fid == nil then fid = fl.id end
+
+                local bbox = self:_fieldBBox(field)
+                if bbox ~= nil then
+                    perennialFields = perennialFields + 1
+                    local _, tally, onPlot = self:samplePaddyCrops(
+                        { farmlandId = fl.id, bbox = bbox }, crops, MyTodos.PERENNIAL_GRID_MAX)
+
+                    -- Volles Histogramm loggen (Reihen-Kulturen: dominante Stufe
+                    -- ist irrefuehrend, wir wollen die Verteilung sehen).
+                    if verbose then
+                        if next(tally) == nil then
+                            Logging.info("[MyTodos]   perennial field %s: no crop foliage sampled (onPlot=%d)",
+                                tostring(fid), onPlot)
+                        else
+                            for ci, growths in pairs(tally) do
+                                local keys = {}
+                                for g in pairs(growths) do table.insert(keys, g) end
+                                table.sort(keys)
+                                local parts = {}
+                                for _, g in ipairs(keys) do
+                                    table.insert(parts, string.format("%d:%d", g, growths[g]))
+                                end
+                                Logging.info("[MyTodos]   perennial field %s %s growth-hist(>0): %s (onPlot=%d)",
+                                    tostring(fid), self:fruitName(crops[ci].fruit),
+                                    table.concat(parts, " "), onPlot)
+                            end
+                        end
+                    end
+
+                    -- Ernte ueber ANWESENHEIT erntereifer Pixel (nicht dominante
+                    -- Stufe): pro Kultur die Pixel im Erntefenster zaehlen.
+                    if not self:isFieldIgnored(fid) then
+                        for ci, growths in pairs(tally) do
+                            local crop = crops[ci]
+                            local minH = crop.fruit.minHarvestingGrowthState
+                            local maxH = crop.fruit.maxHarvestingGrowthState
+                            local harvestPx = 0
+                            if minH ~= nil and maxH ~= nil then
+                                for g, c in pairs(growths) do
+                                    if g >= minH and g <= maxH then harvestPx = harvestPx + c end
+                                end
+                            end
+                            if harvestPx >= MyTodos.PERENNIAL_HARVEST_MIN_POINTS then
+                                local task = self:t("myTodos_fruit_harvest", self:fruitName(crop.fruit))
+                                table.insert(out, {
+                                    fieldId = fid, task = task, primary = task,
+                                    parallel = {}, actionable = true,
+                                    iconFile = self:_fruitIconFile(ci),
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     if verbose then
-        Logging.info("[MyTodos] paddies: %d plot(s) scanned, %d real paddy/orchard(s), %d task-entries",
-            #plots, realPaddies, #out)
+        Logging.info("[MyTodos] paddies: %d plot(s), %d real; perennial fields: %d; %d task-entries",
+            #plots, realPaddies, perennialFields, #out)
         for _, t in ipairs(out) do
-            Logging.info("[MyTodos]   paddy %s -> %s", tostring(t.fieldId), t.task)
+            Logging.info("[MyTodos]   -> %s: %s", tostring(t.fieldId), t.task)
         end
     end
     return out
