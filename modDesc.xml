@@ -50,6 +50,7 @@ GitHub: https://github.com/Neelin/FS25_MyTodos]]></it>
     <extraSourceFiles>
         <sourceFile filename="scripts/MyTodos.lua"/>
         <sourceFile filename="scripts/MyTodosFields.lua"/>
+        <sourceFile filename="scripts/MyTodosPaddies.lua"/>
         <sourceFile filename="scripts/MyTodosHusbandry.lua"/>
         <sourceFile filename="scripts/MyTodosCommands.lua"/>
 

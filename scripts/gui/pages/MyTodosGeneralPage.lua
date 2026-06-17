@@ -46,23 +46,42 @@ end
 -- frueheren FieldsPage.
 local function buildFieldItems()
     if MyTodos.farmId == nil then return {} end
-    local owned = MyTodos:collectOwnedFields(MyTodos.farmId)
-    if owned == nil or #owned == 0 then return {} end
 
-    table.sort(owned, function (a, b)
-        local an, bn = tonumber(a.fieldId), tonumber(b.fieldId)
+    -- fieldId -> Eintrag, damit Felder und Paddy-Grundstuecke ohne Dubletten
+    -- gesammelt und am Ende gemeinsam nach Nummer sortiert werden.
+    local byId = {}
+    local order = {}
+    local function add(fid)
+        if fid == nil or byId[fid] ~= nil then return end
+        byId[fid] = {
+            fieldId = fid,
+            label = MyTodos:t("myTodos_settings_field_label", tostring(fid)),
+            -- Toggle "an" = wird angezeigt; "aus" = ignoriert.
+            checked = not MyTodos:isFieldIgnored(fid),
+        }
+        table.insert(order, fid)
+    end
+
+    for _, entry in ipairs(MyTodos:collectOwnedFields(MyTodos.farmId) or {}) do
+        add(entry.fieldId)
+    end
+    -- Paddy/Perennial-Grundstuecke (Reis/Trauben/Oliven, kein Field-Objekt --
+    -- siehe MyTodosPaddies.lua). paddyPlotIds wird beim Scan gefuellt und
+    -- enthaelt auch ignorierte, damit sie wieder einblendbar bleiben.
+    for _, fid in ipairs(MyTodos.paddyPlotIds or {}) do
+        add(fid)
+    end
+
+    if #order == 0 then return {} end
+    table.sort(order, function (a, b)
+        local an, bn = tonumber(a), tonumber(b)
         if an ~= nil and bn ~= nil then return an < bn end
-        return tostring(a.fieldId) < tostring(b.fieldId)
+        return tostring(a) < tostring(b)
     end)
 
     local items = {}
-    for _, entry in ipairs(owned) do
-        table.insert(items, {
-            fieldId = entry.fieldId,
-            label = MyTodos:t("myTodos_settings_field_label", tostring(entry.fieldId)),
-            -- Toggle "an" = Feld wird angezeigt; "aus" = ignoriert.
-            checked = not MyTodos:isFieldIgnored(entry.fieldId),
-        })
+    for _, fid in ipairs(order) do
+        table.insert(items, byId[fid])
     end
     return items
 end

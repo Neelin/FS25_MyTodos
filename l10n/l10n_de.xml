@@ -57,6 +57,7 @@
         <text name="myTodos_fruit_forage"           text="%s: Siliergut"/>
         <text name="myTodos_fruit_growing"          text="%s: Wächst (%s/%s)"/>
         <text name="myTodos_fruit_regrowing"        text="%s: Wächst nach"/>
+        <text name="myTodos_fruit_sow"              text="%s: Säen"/>
 
         <!-- Unkraut -->
         <text name="myTodos_weed_large_pct"         text="Unkraut groß (%.0f%%)"/>

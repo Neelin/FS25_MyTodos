@@ -57,6 +57,7 @@
         <text name="myTodos_fruit_forage"           text="%s : fourrage"/>
         <text name="myTodos_fruit_growing"          text="%s : pousse (%s/%s)"/>
         <text name="myTodos_fruit_regrowing"        text="%s : repousse"/>
+        <text name="myTodos_fruit_sow"              text="%s : semer"/>
 
         <!-- Weeds -->
         <text name="myTodos_weed_large_pct"         text="Mauvaises herbes grandes (%.0f%%)"/>

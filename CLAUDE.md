@@ -56,6 +56,12 @@ wird — sie wollen nur den Überblick *was jetzt ansteht*. Daraus folgt:
 - `scripts/MyTodosFields.lua` — Field-Discovery, Task-Derivation
   (Vanilla + PF), alle Density-Map-Sampler (Windrow, Stone, Weed,
   pH, N, Soil), Düngen-Lockout-History
+- `scripts/MyTodosPaddies.lua` — Kulturen auf eigenen Grundstücken
+  OHNE Field-Objekt (Reis-Paddies via fieldType=1, mehrjährige
+  Trauben/Oliven). Discovery über FarmlandManager (owned Farmland ohne
+  Field), Crop-Sampling im Farmland-bbox, Task-Ableitung. Wird aus
+  `scanFields` aufgerufen und in `self.fieldTasks` gemerged. Details im
+  mempalace ("Reis/Trauben/Oliven-Subsystem").
 - `scripts/MyTodosHusbandry.lua` — Tier-Discovery + Task-Derivation
 - `scripts/MyTodosCommands.lua` — alle `mt*`-Konsolenbefehle
 - `scripts/gui/` + `config/gui/` — Settings-Menü als vollwertiges
@@ -114,7 +120,11 @@ alte Version weiter. `mtRescan` reloadet nur Daten, nicht Code.
 - `mtFields` / `mtListOwned` / `mtFindField <feldNr>` — Feld-Listen
 - `mtIgnore <feldNr>` / `mtUnignore <feldNr>` — HUD-Filter
 - `mtWhereAmI` / `mtFruitHere` — Position-/Frucht-Probe am Trecker
-- `mtProbe[Windrow|WindrowAt|Stones|Weed|Husbandry|HusbandryDeep|Pf]` — Diagnose-Probes
+- `mtProbe[Windrow|WindrowAt|Stones|Weed|Husbandry|HusbandryDeep|Pf|Paddy]` — Diagnose-Probes
+  (`mtProbePaddy`: Datenmodell für Kulturen auf owned-Farmland OHNE Field-
+  Objekt — Reis, vermutlich auch Trauben/Oliven. Dumpt fieldType-Layer,
+  owned-Farmlands ohne Field, Frucht-Growth am Standort, FruitType-Defs.
+  Frucht-agnostisch — auf dem jeweiligen Grundstück ausführen.)
 - `mtDebugPf <feldNr>` — pH/N/Soil-Histogramm im Feld-Polygon
 
 ## Standard-Workflow für Test

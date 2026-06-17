@@ -43,7 +43,19 @@ end
 -- sonst string -- analog collectOwnedFields).
 function MyTodos:_resolveIgnoreFieldId(arg)
     local field = self:resolveFieldByUserNumber(arg)
-    if field == nil then return nil end
+    if field == nil then
+        -- Kein Field gefunden: koennte ein Paddy/Perennial-Grundstueck sein
+        -- (owned Farmland OHNE Field-Objekt -- siehe MyTodosPaddies.lua). Die
+        -- HUD-/Ignore-ID solcher Eintraege ist die farmland.id direkt.
+        local n = tonumber(arg)
+        if n ~= nil and g_farmlandManager ~= nil
+                and type(g_farmlandManager.farmlands) == "table"
+                and g_farmlandManager.farmlands[n] ~= nil
+                and g_farmlandManager:getFarmlandOwner(n) == self.farmId then
+            return n
+        end
+        return nil
+    end
     local fname = field.farmland and field.farmland.name
     if type(fname) == "string" and fname ~= "" then
         return tonumber(fname) or fname
@@ -1717,4 +1729,284 @@ function MyTodos:consoleDumpSlicesCmd(filter)
     end
     Logging.info("[MyTodos] mtDumpSlices done (%d matched)", total)
     return "mtDumpSlices done - check log"
+end
+
+-- Paddy/Perennial-Diagnose. Hintergrund: Reisfelder auf Hutan Pantari
+-- (mapAS) sind als fieldType=1 ("rice") aufs Terrain gemalt und werden von
+-- FS25 NICHT als Field-Objekt angelegt -- sie sind owned Farmlands ohne
+-- Eintrag in g_fieldManager:getFields(). Sehr wahrscheinlich gilt dasselbe
+-- fuer Trauben (GRAPE) und Oliven (OLIVE): mehrjaehrige Kulturen, die auf ein
+-- eigenes Grundstueck gepflanzt werden, ebenfalls ohne Field-Objekt. Der
+-- ganze Mod kennt nur getFields(), darum sind all diese unsichtbar. Dieser
+-- Probe sammelt die 4 Unbekannten die wir fuer ein eigenes Subsystem brauchen
+-- (frucht-agnostisch -- funktioniert auf Reis, Trauben, Oliven gleichermassen):
+--   A) Handle/Struktur des fieldType-Density-Layers (rice = value 1)
+--   B) welche Farmlands dir gehoeren aber KEIN Field haben (= Kandidaten)
+--   C) Frucht + Growth-State am aktuellen Standort + Box-Histogramm
+--   D) FruitType-Definition (RICE/RICELONGGRAIN/GRAPE/OLIVE + was am Ort liegt)
+-- Mit einem Fahrzeug mitten auf das jeweilige Grundstueck fahren, dann
+-- ausfuehren -- bei mehreren Kultur-Typen je einmal pro Typ.
+addConsoleCommand("mtProbePaddy",
+    "Probe perennial-crop data model (rice/grape/olive on ownerless farmland). Stand on the plot.",
+    "consoleProbePaddyCmd", MyTodos)
+function MyTodos:consoleProbePaddyCmd()
+    if g_currentMission == nil then return "g_currentMission nil" end
+    Logging.info("[MyTodos] === mtProbePaddy ===")
+
+    -- A) fieldType-Density-Layer ----------------------------------------
+    -- Wir wollen das Handle finden, mit dem wir spaeter einen
+    -- DensityMapModifier bauen koennen (rice = value 1). Erst die ganze
+    -- densityMaps-Tabelle + fieldGroundSystem-Methoden dumpen, dann den
+    -- fieldType-Eintrag explizit aufschluesseln.
+    local fgs = g_currentMission.fieldGroundSystem
+    local fieldTypeEntry = nil
+    if fgs == nil then
+        Logging.info("[MyTodos] (A) fieldGroundSystem: nil")
+    else
+        self:_listClassMethods("fieldGroundSystem", fgs)
+        local dms = fgs.densityMaps
+        if type(dms) == "table" then
+            Logging.info("[MyTodos] (A) fieldGroundSystem.densityMaps:")
+            for k, v in pairs(dms) do
+                Logging.info("[MyTodos]   [%s] = <%s>", tostring(k), type(v))
+                if type(v) == "table" then
+                    self:dumpKeys(string.format("    densityMaps[%s]", tostring(k)), v)
+                end
+                -- fieldType-Eintrag per .key erkennen (Tabelle ist numerisch
+                -- gekeyt 1..N, NICHT nach Layer-Name). Handle liegt auf .map.
+                if type(v) == "table" and tostring(v.key):lower():find("fieldtype") then
+                    fieldTypeEntry = v
+                end
+            end
+        else
+            Logging.info("[MyTodos] (A) fieldGroundSystem.densityMaps: <%s>", type(dms))
+        end
+        -- Direkte top-level keys des Systems (vielleicht liegt das fieldType-
+        -- Handle dort als eigenes Feld, nicht unter densityMaps).
+        self:dumpKeys("(A) fieldGroundSystem keys", fgs)
+    end
+
+    -- fieldType-Modifier einmal bauen (Handle = entry.map), wiederverwendbar
+    -- in (B) pro Farmland-Box und in (C) am Standort. rice = value 1.
+    local ftMod, ftRiceFilter
+    if type(fieldTypeEntry) == "table" and fieldTypeEntry.map ~= nil
+            and DensityMapModifier ~= nil and DensityMapFilter ~= nil
+            and g_currentMission.terrainRootNode ~= nil then
+        local fc = fieldTypeEntry.firstChannel or 0
+        local nc = fieldTypeEntry.numChannels or 1
+        local ok, m = pcall(DensityMapModifier.new, fieldTypeEntry.map, fc, nc,
+            g_currentMission.terrainRootNode)
+        if ok and m ~= nil then
+            ftMod = m
+            ftRiceFilter = DensityMapFilter.new(m)
+            ftRiceFilter:setValueCompareParams(DensityValueCompareType.EQUAL, 1)
+            Logging.info("[MyTodos] (A) fieldType modifier ready (map=%s fc=%d nc=%d, rice=value 1)",
+                tostring(fieldTypeEntry.map), fc, nc)
+        else
+            Logging.info("[MyTodos] (A) fieldType modifier build failed: %s", tostring(m))
+        end
+    else
+        Logging.info("[MyTodos] (A) no fieldType entry/map found -- cannot build modifier")
+    end
+    -- Box-Sampler: rice(v=1) vs total in einer quadratischen Box um (cx,cz).
+    local function sampleFieldTypeBox(cx, cz, r)
+        if ftMod == nil or cx == nil or cz == nil then return nil, nil end
+        ftMod:clearPolygonPoints()
+        ftMod:addPolygonPointWorldCoords(cx - r, cz - r)
+        ftMod:addPolygonPointWorldCoords(cx + r, cz - r)
+        ftMod:addPolygonPointWorldCoords(cx + r, cz + r)
+        ftMod:addPolygonPointWorldCoords(cx - r, cz + r)
+        local _, _, totalArea = ftMod:executeGet()
+        local _, riceArea, _ = ftMod:executeGet(ftRiceFilter)
+        return totalArea, riceArea
+    end
+
+    -- B) Owned Farmlands OHNE Field-Objekt = Paddy-Kandidaten -----------
+    -- Set der Farmland-IDs die ein Field tragen.
+    local fieldFarmlandIds = {}
+    if g_fieldManager ~= nil then
+        for _, field in pairs(g_fieldManager:getFields()) do
+            if field.farmland ~= nil and field.farmland.id ~= nil then
+                fieldFarmlandIds[field.farmland.id] = true
+            end
+        end
+    end
+    Logging.info("[MyTodos] (B) owned farmlands WITHOUT a Field (paddy candidates):")
+    local candidateCount = 0
+    if g_farmlandManager ~= nil and type(g_farmlandManager.farmlands) == "table" then
+        -- nach id sortiert ausgeben
+        local ids = {}
+        for id in pairs(g_farmlandManager.farmlands) do
+            if type(id) == "number" then table.insert(ids, id) end
+        end
+        table.sort(ids)
+        for _, id in ipairs(ids) do
+            local fl = g_farmlandManager.farmlands[id]
+            local owner = g_farmlandManager:getFarmlandOwner(id)
+            if owner == self.farmId and not fieldFarmlandIds[id] then
+                candidateCount = candidateCount + 1
+                Logging.info("[MyTodos]   farmland id=%s name=%s areaHa=%s npc=%s buyable=%s",
+                    tostring(id), tostring(fl and fl.name),
+                    tostring(fl and (fl.areaInHa or fl.areaHa)),
+                    tostring(fl and fl.npcIndex),
+                    tostring(fl and fl.isBuyable))
+                if fl ~= nil then
+                    self:dumpKeys(string.format("    farmland[%s]", tostring(id)), fl)
+                    -- boundingBox-Struktur aufschluesseln (Geometrie-Quelle
+                    -- fuer das Subsystem, da es kein polygonPoints gibt).
+                    if type(fl.boundingBox) == "table" then
+                        self:dumpKeys(string.format("    farmland[%s].boundingBox", tostring(id)),
+                            fl.boundingBox)
+                    end
+                    -- fieldType ueber die Flaeche sampeln: Box ums Zentrum,
+                    -- Kantenlaenge ~ aus areaInHa abgeleitet (+Puffer).
+                    if ftMod ~= nil and fl.xWorldPos ~= nil and fl.zWorldPos ~= nil then
+                        local side = math.sqrt(math.max(fl.areaInHa or 0.05, 0.01) * 10000)
+                        local r = side * 0.7
+                        local totalA, riceA = sampleFieldTypeBox(fl.xWorldPos, fl.zWorldPos, r)
+                        Logging.info("[MyTodos]     -> fieldType box(center,r=%.0f): totalArea=%s rice(v=1)Area=%s",
+                            r, tostring(totalA), tostring(riceA))
+                    end
+                end
+            end
+        end
+    else
+        Logging.info("[MyTodos]   g_farmlandManager.farmlands not a table")
+    end
+    Logging.info("[MyTodos] (B) -> %d candidate(s)", candidateCount)
+
+    -- Position bestimmen (kompakter Finder wie in mtFruitHere) ----------
+    local cm = g_currentMission
+    local x, z
+    if _G.g_localPlayer ~= nil and _G.g_localPlayer.controlledVehicle ~= nil
+            and _G.g_localPlayer.controlledVehicle.rootNode ~= nil then
+        x, _, z = getWorldTranslation(_G.g_localPlayer.controlledVehicle.rootNode)
+    end
+    if x == nil and cm.vehicleSystem ~= nil
+            and type(cm.vehicleSystem.vehicles) == "table" then
+        for _, veh in ipairs(cm.vehicleSystem.vehicles) do
+            if veh.rootNode ~= nil then
+                local active = false
+                for _, m in ipairs({"getIsEntered", "getIsControlled"}) do
+                    if type(veh[m]) == "function" then
+                        local ok, r = pcall(veh[m], veh)
+                        if ok and r == true then active = true; break end
+                    end
+                end
+                if active then x, _, z = getWorldTranslation(veh.rootNode); break end
+            end
+        end
+    end
+    if x == nil then
+        return string.format("Paddy probe (A/B) done -- %d candidate(s). Get in a vehicle on a paddy for C/D.",
+            candidateCount)
+    end
+
+    -- C) Spot- + Box-Sampling am Standort -------------------------------
+    Logging.info("[MyTodos] (C) sampling at x=%.2f z=%.2f", x, z)
+    if g_farmlandManager ~= nil and type(g_farmlandManager.getFarmlandIdAtWorldPosition) == "function" then
+        local ok, fid = pcall(g_farmlandManager.getFarmlandIdAtWorldPosition, g_farmlandManager, x, z)
+        if ok then
+            local owner = (type(fid) == "number") and g_farmlandManager:getFarmlandOwner(fid) or nil
+            Logging.info("[MyTodos]   farmland here = %s (owner=%s, your farmId=%s, hasField=%s)",
+                tostring(fid), tostring(owner), tostring(self.farmId),
+                tostring(type(fid) == "number" and fieldFarmlandIds[fid] == true))
+        end
+    end
+    -- Frucht + Growth-State am exakten Punkt: getFruitTypeIndexAtWorldPos
+    -- liefert (fruitIndex, growthState) -- bestaetigt durch mtWhereAmI (r1=9 r2=5).
+    if FSDensityMapUtil ~= nil and type(FSDensityMapUtil.getFruitTypeIndexAtWorldPos) == "function" then
+        local ok, fi, gs = pcall(FSDensityMapUtil.getFruitTypeIndexAtWorldPos, x, z)
+        Logging.info("[MyTodos]   getFruitTypeIndexAtWorldPos -> ok=%s fruitIndex=%s growthState=%s",
+            tostring(ok), tostring(fi), tostring(gs))
+    end
+
+    -- fieldType-Wert in einer 40m-Box um den Standort (rice = value 1).
+    do
+        local totalA, riceA = sampleFieldTypeBox(x, z, 20)
+        if totalA ~= nil then
+            Logging.info("[MyTodos]   fieldType box(here,r=20): totalArea=%s rice(v=1)Area=%s",
+                tostring(totalA), tostring(riceA))
+        else
+            Logging.info("[MyTodos]   fieldType sampler unavailable -- see (A)")
+        end
+    end
+
+    -- Box-Grid-Histogramm der Growth-States ohne Frucht-Map-Handle:
+    -- 7x7 Punkte ueber ~42m, je getFruitTypeIndexAtWorldPos, tallying.
+    -- foundFruits sammelt welche Fruchtindizes hier liegen -> (D) dumpt
+    -- deren Definition automatisch (deckt Reis genauso wie Trauben/Oliven ab).
+    local foundFruits = {}
+    if FSDensityMapUtil ~= nil and type(FSDensityMapUtil.getFruitTypeIndexAtWorldPos) == "function" then
+        local tally = {}   -- key "fruitIdx:growth" -> count
+        local R, N = 21, 7
+        for i = 0, N - 1 do
+            for j = 0, N - 1 do
+                local px = x - R + (2 * R) * i / (N - 1)
+                local pz = z - R + (2 * R) * j / (N - 1)
+                local ok, fi, gs = pcall(FSDensityMapUtil.getFruitTypeIndexAtWorldPos, px, pz)
+                if ok and type(fi) == "number" and fi > 0 then
+                    local key = string.format("%d:%s", fi, tostring(gs))
+                    tally[key] = (tally[key] or 0) + 1
+                    foundFruits[fi] = true
+                end
+            end
+        end
+        Logging.info("[MyTodos] (C) grid histogram fruitIdx:growthState -> count (N=%d):", N * N)
+        local keys = {}
+        for k in pairs(tally) do table.insert(keys, k) end
+        table.sort(keys)
+        for _, k in ipairs(keys) do
+            local fi = tonumber(string.match(k, "^(%d+):"))
+            local fname = (fi ~= nil and g_fruitTypeManager ~= nil)
+                and (g_fruitTypeManager:getFruitTypeByIndex(fi) or {}).name or "?"
+            Logging.info("[MyTodos]   %s (%s) -> %d px", k, tostring(fname), tally[k])
+        end
+    end
+
+    -- D) FruitType-Definition (Task-Vokabular) --------------------------
+    -- numGrowthStates, min/maxHarvestingGrowthState, witheredState,
+    -- cutState(s), growthStateToName -- analog zu dem was derivePrimaryVanilla
+    -- aus normalen Feldern liest. Wir dumpen die bekannten Mehrjahres-/
+    -- Spezialfruechte (Reis, Trauben, Oliven -- werden alle auf eigene
+    -- Grundstuecke ohne Field-Objekt gepflanzt) PLUS alles was das Grid
+    -- gerade unter den Reifen gefunden hat (datengetrieben).
+    if g_fruitTypeManager ~= nil then
+        local wantIdx, order = {}, {}
+        local function want(idx)
+            if type(idx) == "number" and idx > 0 and not wantIdx[idx] then
+                wantIdx[idx] = true
+                table.insert(order, idx)
+            end
+        end
+        for _, name in ipairs({"RICE", "RICELONGGRAIN", "GRAPE", "OLIVE"}) do
+            local idx = nil
+            if type(g_fruitTypeManager.getFruitTypeByName) == "function" then
+                local ft = g_fruitTypeManager:getFruitTypeByName(name)
+                idx = ft and ft.index
+            end
+            if idx == nil and FruitType ~= nil then idx = FruitType[name] end
+            want(idx)
+        end
+        for fi in pairs(foundFruits) do want(fi) end
+
+        for _, idx in ipairs(order) do
+            local ft = g_fruitTypeManager:getFruitTypeByIndex(idx)
+            if ft ~= nil then
+                self:dumpKeys(string.format("(D) fruit[%d] %s", idx, tostring(ft.name)), ft)
+                if type(ft.growthStateToName) == "table" then
+                    self:dumpKeys(string.format("(D) fruit[%d].growthStateToName", idx),
+                        ft.growthStateToName)
+                end
+                if type(ft.cutStates) == "table" then
+                    self:dumpKeys(string.format("(D) fruit[%d].cutStates", idx), ft.cutStates)
+                end
+            else
+                Logging.info("[MyTodos] (D) fruit idx=%s: not found", tostring(idx))
+            end
+        end
+    end
+
+    return string.format("Paddy probe done -- %d candidate(s). Check log for A/B/C/D.",
+        candidateCount)
 end

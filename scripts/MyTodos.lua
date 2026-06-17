@@ -421,7 +421,8 @@ function MyTodos:scanFields(verbose)
             if fs ~= nil then
                 self:updateFieldHistory(entry.fieldId, fs)
             end
-            local task, primary, parallel = self:deriveFieldTask(entry.field, entry.fieldId)
+            local task, primary, parallel, actionable =
+                self:deriveFieldTask(entry.field, entry.fieldId)
             if task ~= nil then
                 local iconFile = nil
                 if fs ~= nil then
@@ -429,11 +430,30 @@ function MyTodos:scanFields(verbose)
                 end
                 table.insert(tasks, { fieldId = entry.fieldId, task = task,
                     primary = primary or task, parallel = parallel or {},
+                    actionable = actionable == true,
                     iconFile = iconFile })
             end
         end
     end
+    -- Paddies/Perennials (Reis/Trauben/Oliven auf eigenen Grundstuecken OHNE
+    -- Field-Objekt -- siehe MyTodosPaddies.lua). Gleiches Eintrags-Schema, wird
+    -- hier vor dem Sortieren gemerged, damit sie inline mit den Feldern nach
+    -- Nummer einsortiert werden. paddyOwnedCount fliesst in die "owned"-Zaehlung
+    -- ein, damit die HUD-"keine eigenen Felder"-Meldung korrekt bleibt.
+    local paddyTasks = self:scanPaddies(verbose)
+    for _, pt in ipairs(paddyTasks) do
+        table.insert(tasks, pt)
+    end
+    self.fieldOwnedCount = self.fieldOwnedCount + (self.paddyOwnedCount or 0)
+
+    -- Sortierung: zwei Gruppen nach Dringlichkeit. Felder mit echter
+    -- Hauptaufgabe (Ernten/Siliergut/Verwelkt/Prep -> actionable=true) zuerst,
+    -- danach die nur-wachsenden Felder (die nur wegen Nebenaufgaben wie Duengen/
+    -- Unkraut sichtbar sind). Innerhalb jeder Gruppe nach Feldnummer.
     table.sort(tasks, function(a, b)
+        if a.actionable ~= b.actionable then
+            return a.actionable
+        end
         local an = tonumber(a.fieldId) or math.huge
         local bn = tonumber(b.fieldId) or math.huge
         if an ~= bn then return an < bn end
