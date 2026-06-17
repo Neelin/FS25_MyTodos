@@ -968,13 +968,16 @@ end
 
 -- Task derivation --------------------------------------------------
 
--- Returns: task (fertig formatierter HUD-String), primary, parallel-Liste.
--- primary/parallel braucht die Komplettuebersicht fuer ihre Tabellenspalten.
+-- Returns: task (fertig formatierter HUD-String), primary, parallel-Liste,
+-- actionable (boolean). primary/parallel braucht die Komplettuebersicht fuer
+-- ihre Tabellenspalten; actionable steuert die HUD-Sortierung (Felder mit
+-- echter Hauptaufgabe vor nur-wachsenden). fehlender fieldState gilt als
+-- actionable (Anomalie, soll oben sichtbar sein -- siehe Helden-Feld 29).
 function MyTodos:deriveFieldTask(field, fieldId)
     local fs = field.fieldState
     if fs == nil then
         local label = self:t("myTodos_task_no_fieldstate")
-        return label, label, {}
+        return label, label, {}, true
     end
     return self:deriveTaskVanilla(fs, fieldId, field)
 end
@@ -999,7 +1002,7 @@ function MyTodos:deriveTaskVanilla(fs, fieldId, field)
     else
         task = string.format("%s  [+ %s]", primary, table.concat(parallel, ", "))
     end
-    return task, primary, parallel
+    return task, primary, parallel, actionable == true
 end
 
 function MyTodos:isPlowingRequired()

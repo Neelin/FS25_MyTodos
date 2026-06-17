@@ -752,12 +752,25 @@ function MyTodos:_foodFillTypeRatio(food, fillTypeIdx)
     return lvl / cap
 end
 
--- Liefert task-string, Tier-Anzahl und parts-Liste fuer eine Husbandry --
--- oder nil wenn nichts ansteht. Anzahl + parts braucht die Komplett-
--- uebersicht fuer ihre Tabellenspalten.
+-- Dringlichkeitsstufen fuer die HUD-Sortierung der Tier-Aufgaben (niedriger
+-- = dringlicher = weiter oben). Ein Stall erbt die Stufe seiner dringlichsten
+-- Aufgabe.
+--   SUPPLY  = Futter/Wasser leer (Tiere leiden) -> oben
+--   BEDDING = Stroh/Weide knapp
+--   OUTPUT  = Lager voll (Mist/Guelle/Milch/Paletten) -> unten
+MyTodos.HUSB_PRIO_SUPPLY  = 1
+MyTodos.HUSB_PRIO_BEDDING = 2
+MyTodos.HUSB_PRIO_OUTPUT  = 3
+
+-- Liefert task-string, Tier-Anzahl, parts-Liste und Dringlichkeitsstufe
+-- (HUSB_PRIO_*) fuer eine Husbandry -- oder nil wenn nichts ansteht. Anzahl +
+-- parts braucht die Komplettuebersicht fuer ihre Tabellenspalten; die Stufe
+-- steuert die Sortierung in scanHusbandries.
 function MyTodos:deriveHusbandryTask(entry)
     local p = entry.placeable
     local parts = {}
+    -- Dringlichste Stufe ueber alle aufgenommenen parts (math.min).
+    local priority = math.huge
 
     -- Stall ohne Tiere -> keine Tasks. Futter/Wasser/Mist sind irrelevant
     -- solange niemand eingestallt ist (User-Entscheidung 15.05.2026).
@@ -781,12 +794,14 @@ function MyTodos:deriveHusbandryTask(entry)
         if r ~= nil
                 and r < self:_pctThreshold("foodThreshold", 20) / 100 then
             table.insert(parts, self:t("myTodos_husb_tmr", r * 100))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_SUPPLY)
         end
     else
         local foodRatio = self:_specFillRatio(p, food, "capacity")
         if foodRatio ~= nil
                 and foodRatio < self:_pctThreshold("foodThreshold", 20) / 100 then
             table.insert(parts, self:t("myTodos_husb_food", foodRatio * 100))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_SUPPLY)
         end
     end
 
@@ -796,6 +811,7 @@ function MyTodos:deriveHusbandryTask(entry)
         local r = self:_waterRatio(p, water)
         if r ~= nil and r < self:_pctThreshold("waterThreshold", 20) / 100 then
             table.insert(parts, self:t("myTodos_husb_water", r * 100))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_SUPPLY)
         end
     end
 
@@ -807,6 +823,7 @@ function MyTodos:deriveHusbandryTask(entry)
         if meadowRatio ~= nil
                 and meadowRatio < self:_pctThreshold("meadowThreshold", 20) / 100 then
             table.insert(parts, self:t("myTodos_husb_meadow", meadowRatio * 100))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_BEDDING)
         end
     end
 
@@ -816,6 +833,7 @@ function MyTodos:deriveHusbandryTask(entry)
         local r = self:_filltypeRatio(p, straw.inputFillType)
         if r ~= nil and r < self:_pctThreshold("strawThreshold", 20) / 100 then
             table.insert(parts, self:t("myTodos_husb_straw", r * 100))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_BEDDING)
         end
     end
 
@@ -833,6 +851,7 @@ function MyTodos:deriveHusbandryTask(entry)
         local r = self:_filltypeRatio(p, manureFt)
         if r ~= nil and r >= self:_pctThreshold("manureThreshold", 80) / 100 then
             table.insert(parts, self:t("myTodos_husb_manure", r * 100))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_OUTPUT)
         end
     end
 
@@ -842,6 +861,7 @@ function MyTodos:deriveHusbandryTask(entry)
         local r = self:_filltypeRatio(p, lmanure.fillType)
         if r ~= nil and r >= self:_pctThreshold("liquidManureThreshold", 80) / 100 then
             table.insert(parts, self:t("myTodos_husb_liquid_manure", r * 100))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_OUTPUT)
         end
     end
 
@@ -860,6 +880,9 @@ function MyTodos:deriveHusbandryTask(entry)
         table.sort(milkParts)
         for _, m in ipairs(milkParts) do
             table.insert(parts, m)
+        end
+        if #milkParts > 0 then
+            priority = math.min(priority, MyTodos.HUSB_PRIO_OUTPUT)
         end
     end
 
@@ -893,10 +916,12 @@ function MyTodos:deriveHusbandryTask(entry)
                 s = s .. self:t("myTodos_husb_pallets_full_suffix")
             end
             table.insert(parts, s)
+            priority = math.min(priority, MyTodos.HUSB_PRIO_OUTPUT)
         elseif pal.palletLimitReached then
             -- Edge case: Limit erreicht direkt nach Pallet-Spawn (Buffer
             -- bereits zurueckgesetzt). Production gestoppt -> Hinweis.
             table.insert(parts, self:t("myTodos_husb_pallets_full"))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_OUTPUT)
         end
     end
 
@@ -906,7 +931,7 @@ function MyTodos:deriveHusbandryTask(entry)
     local n = self:_husbandryNumAnimals(p)
     local heading = string.format("%s (%d)", entry.name, n)
     local task = string.format("%s - %s", heading, table.concat(parts, ", "))
-    return task, n, parts
+    return task, n, parts, priority
 end
 
 function MyTodos:scanHusbandries(verbose)
@@ -918,13 +943,21 @@ function MyTodos:scanHusbandries(verbose)
     self.husbandryOwnedCount = #owned
 
     for _, entry in ipairs(owned) do
-        local task, numAnimals, parts = self:deriveHusbandryTask(entry)
+        local task, numAnimals, parts, priority = self:deriveHusbandryTask(entry)
         if task ~= nil then
             table.insert(self.husbandryTasks, { name = entry.name, task = task,
                 numAnimals = numAnimals, parts = parts,
+                priority = priority or math.huge, index = entry.index,
                 iconFile = self:_animalIconFile(entry.placeable) })
         end
     end
+
+    -- Nach Dringlichkeit sortieren: knappe Vorraete (Futter/Wasser) oben, volle
+    -- Lager unten. Gleichstand -> Stall-Reihenfolge (Platzierungs-Index) wie bisher.
+    table.sort(self.husbandryTasks, function(a, b)
+        if a.priority ~= b.priority then return a.priority < b.priority end
+        return (a.index or 0) < (b.index or 0)
+    end)
 
     if verbose then
         Logging.info("[MyTodos] husbandries: %d owned, %d with tasks",
