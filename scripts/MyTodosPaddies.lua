@@ -32,6 +32,11 @@ MyTodos.PADDY_GRID_MAX = 24            -- max NxN Sample-Punkte je Grundstueck
 -- Reihen mit Luecken) und Ernte ueber Pixel-ANWESENHEIT statt dominanter Stufe.
 MyTodos.PERENNIAL_GRID_MAX = 36
 MyTodos.PERENNIAL_HARVEST_MIN_POINTS = 5
+-- Duengen/Kalken bei Mehrjaehrigen: Anteil der Feldflaeche, der unterversorgt
+-- sein muss (gegen Rand-Pixel-Rauschen). Wichtig weil das fieldState-Aggregat
+-- bei gemischt gepflegten Feldern (Trauben ged., Oliven nicht) den dominanten
+-- Wert meldet und die unterversorgte Haelfte verschluckt -> wir sampeln direkt.
+MyTodos.PERENNIAL_SUPPLY_MIN_FRACTION = 0.10
 
 -- Aufloesung der Kultur-Namen -> { [fruitIndex] = {index, name, fruit, sowable} }.
 function MyTodos:_resolvePaddyCrops()
@@ -87,6 +92,28 @@ function MyTodos:_buildRiceGroundSampler()
     local filter = DensityMapFilter.new(mod)
     filter:setValueCompareParams(DensityValueCompareType.EQUAL, MyTodos.PADDY_FIELDTYPE_RICE)
     return mod, filter
+end
+
+-- Generischer DensityMapModifier auf einen fieldGround-Layer, gefunden ueber
+-- einen Teilstring seines .key (z.B. "spraylevel", "limelevel"). Handle (.map)
+-- ist Runtime -> jede Session frisch. Liefert mod, maxValue -- oder nil, 0.
+function MyTodos:_buildGroundLayerSampler(keySubstr)
+    local fgs = g_currentMission and g_currentMission.fieldGroundSystem
+    if fgs == nil or type(fgs.densityMaps) ~= "table"
+            or DensityMapModifier == nil or DensityMapFilter == nil
+            or g_currentMission.terrainRootNode == nil then
+        return nil, 0
+    end
+    for _, v in pairs(fgs.densityMaps) do
+        if type(v) == "table" and type(v.key) == "string"
+                and v.key:lower():find(keySubstr) and v.map ~= nil then
+            local ok, mod = pcall(DensityMapModifier.new, v.map,
+                v.firstChannel or 0, v.numChannels or 1, g_currentMission.terrainRootNode)
+            if ok and mod ~= nil then return mod, v.maxValue or 0 end
+            return nil, 0
+        end
+    end
+    return nil, 0
 end
 
 -- rice-Boden-Flaeche (fieldType==1) im bbox eines Grundstuecks. Pixel-Einheit.
@@ -249,6 +276,21 @@ function MyTodos:_isPerennialFieldCrop(fruitIndex)
     return c ~= nil and c.sowable == false
 end
 
+-- Ist dieses Feld (per fieldState) ein Reben-/Oliven-Feld? Robust gegen das
+-- Problem, dass nach der Ernte / bei Reihen-Luecken fruitTypeIndex auf 0 faellt:
+-- dann zieht lastFruitTypeIndex (bleibt auf der mehrjaehrigen Kultur stehen).
+-- Prioritaet: aktueller Crop wenn bekannt (>0) -- so wird ein Feld, das wirklich
+-- auf eine einjaehrige Frucht umgestellt wurde, NICHT faelschlich als Reben-Feld
+-- behandelt; nur bei leerem Aggregat faellt es auf den letzten Crop zurueck.
+function MyTodos:_fieldIsPerennial(fs)
+    if fs == nil then return false end
+    local cur = fs.fruitTypeIndex or 0
+    if cur > 0 then
+        return self:_isPerennialFieldCrop(cur)
+    end
+    return self:_isPerennialFieldCrop(fs.lastFruitTypeIndex or 0)
+end
+
 -- bbox {minX,minZ,maxX,maxZ} aus den Feld-Polygon-Knoten (Engine-Node-IDs ->
 -- Weltkoords). Nil wenn kein Polygon.
 function MyTodos:_fieldBBox(field)
@@ -264,6 +306,66 @@ function MyTodos:_fieldBBox(field)
     end
     if minX > maxX then return nil end
     return { minX = minX, maxX = maxX, minZ = minZ, maxZ = maxZ }
+end
+
+-- Feldweite Pflege-Tasks fuer ein mehrjaehriges Feld (Duengen/Kalken).
+-- WICHTIG: NICHT das fieldState-Aggregat nutzen -- das meldet bei gemischt
+-- gepflegten Feldern (Trauben gedüngt, Oliven nicht) nur den dominanten Wert
+-- und verschluckt die unterversorgte Haelfte. Stattdessen die sprayLevel/
+-- limeLevel-Density-Maps direkt im Feld-Polygon histogrammieren: Aufgabe wenn
+-- ein signifikanter Flaechen-Anteil unterversorgt ist.
+-- samplers = { sprayMod, sprayMax, limeMod }. PF: vorerst Vanilla (Phase 2).
+function MyTodos:_perennialFieldParallels(field, fid, samplers, verbose)
+    local out = {}
+    if self.precisionFarming == "active" then return out end
+    local frac = MyTodos.PERENNIAL_SUPPLY_MIN_FRACTION
+
+    -- Duengen: Anteil der Feldflaeche mit sprayLevel < max.
+    local sprayMod, sprayMax = samplers.sprayMod, samplers.sprayMax
+    if sprayMod ~= nil and sprayMax ~= nil and sprayMax > 0 then
+        self:applyFieldPolygon(sprayMod, field)
+        local _, _, total = sprayMod:executeGet()
+        if total ~= nil and total > 0 then
+            local under, minLevel = 0, nil
+            for v = 0, sprayMax do
+                local fv = DensityMapFilter.new(sprayMod)
+                fv:setValueCompareParams(DensityValueCompareType.EQUAL, v)
+                local _, a = sprayMod:executeGet(fv)
+                a = a or 0
+                if a > 0 and minLevel == nil then minLevel = v end
+                if v < sprayMax then under = under + a end
+            end
+            if verbose then
+                Logging.info("[MyTodos]   perennial field %s spray: under-max %d/%d (%.0f%%) minLevel=%s",
+                    tostring(fid), under, total, 100 * under / total, tostring(minLevel))
+            end
+            if under / total >= frac then
+                table.insert(out, self:t("myTodos_task_fertilize", minLevel or 0, sprayMax))
+            end
+        end
+    end
+
+    -- Kalken: Anteil der Feldflaeche mit limeLevel == 0 (Trauben/Oliven
+    -- consumesLime=true).
+    local limeMod = samplers.limeMod
+    if limeMod ~= nil then
+        self:applyFieldPolygon(limeMod, field)
+        local _, _, total = limeMod:executeGet()
+        if total ~= nil and total > 0 then
+            local fz = DensityMapFilter.new(limeMod)
+            fz:setValueCompareParams(DensityValueCompareType.EQUAL, 0)
+            local _, zero = limeMod:executeGet(fz)
+            zero = zero or 0
+            if verbose then
+                Logging.info("[MyTodos]   perennial field %s lime: level0 %d/%d (%.0f%%)",
+                    tostring(fid), zero, total, 100 * zero / total)
+            end
+            if zero / total >= frac then
+                table.insert(out, self:t("myTodos_task_lime"))
+            end
+        end
+    end
+    return out
 end
 
 -- Scan-Einstieg. Liefert eine Liste von HUD-Eintraegen im selben Schema wie
@@ -341,11 +443,16 @@ function MyTodos:scanPaddies(verbose)
     -- normalen Field-Pfad (es sind echte Felder).
     local perennialFields = 0
     if g_fieldManager ~= nil and g_farmlandManager ~= nil then
+        -- Spray-/Kalk-Density-Sampler einmal bauen (Handles runtime). Fuer
+        -- Duengen/Kalken direkt im Feld-Polygon, statt dem truegerischen Aggregat.
+        local sprayMod, sprayMax = self:_buildGroundLayerSampler("spraylevel")
+        local limeMod = self:_buildGroundLayerSampler("limelevel")
+        local careSamplers = { sprayMod = sprayMod, sprayMax = sprayMax, limeMod = limeMod }
         for _, field in pairs(g_fieldManager:getFields()) do
             local fs = field.fieldState
             local fl = field.farmland
             if fs ~= nil and fl ~= nil and fl.id ~= nil
-                    and self:_isPerennialFieldCrop(fs.fruitTypeIndex or 0)
+                    and self:_fieldIsPerennial(fs)
                     and g_farmlandManager:getFarmlandOwner(fl.id) == self.farmId then
                 -- Anzeige-Nummer wie collectOwnedFields: farmland.name -> id.
                 local fid
@@ -383,9 +490,11 @@ function MyTodos:scanPaddies(verbose)
                         end
                     end
 
-                    -- Ernte ueber ANWESENHEIT erntereifer Pixel (nicht dominante
-                    -- Stufe): pro Kultur die Pixel im Erntefenster zaehlen.
                     if not self:isFieldIgnored(fid) then
+                        -- Ernte ueber ANWESENHEIT erntereifer Pixel (nicht
+                        -- dominante Stufe): pro Kultur die Pixel im Erntefenster
+                        -- zaehlen.
+                        local harvestList = {}
                         for ci, growths in pairs(tally) do
                             local crop = crops[ci]
                             local minH = crop.fruit.minHarvestingGrowthState
@@ -397,13 +506,54 @@ function MyTodos:scanPaddies(verbose)
                                 end
                             end
                             if harvestPx >= MyTodos.PERENNIAL_HARVEST_MIN_POINTS then
-                                local task = self:t("myTodos_fruit_harvest", self:fruitName(crop.fruit))
+                                table.insert(harvestList, ci)
+                            end
+                        end
+
+                        -- Feldweite Pflege (Duengen/Kalken) nur wenn ueberhaupt
+                        -- eine Kultur steht. Density-basiert (Feld-Polygon), nicht
+                        -- das Aggregat -- sonst verschluckt es ungepflegte Teile.
+                        local parallels = {}
+                        if next(tally) ~= nil then
+                            parallels = self:_perennialFieldParallels(
+                                field, fid, careSamplers, verbose)
+                        end
+
+                        if #harvestList > 0 then
+                            -- Pro erntereifer Kultur eine Zeile; feldweite Pflege
+                            -- an die erste anhaengen (gilt feldweit, nicht doppeln).
+                            for i, ci in ipairs(harvestList) do
+                                local primary = self:t("myTodos_fruit_harvest",
+                                    self:fruitName(crops[ci].fruit))
+                                local par = (i == 1) and parallels or {}
+                                local task = primary
+                                if #par > 0 then
+                                    task = string.format("%s  [+ %s]", primary,
+                                        table.concat(par, ", "))
+                                end
                                 table.insert(out, {
-                                    fieldId = fid, task = task, primary = task,
-                                    parallel = {}, actionable = true,
+                                    fieldId = fid, task = task, primary = primary,
+                                    parallel = par, actionable = true,
                                     iconFile = self:_fruitIconFile(ci),
                                 })
                             end
+                        elseif #parallels > 0 then
+                            -- Keine Ernte, aber feldweite Pflege offen -> eine
+                            -- Feld-Zeile (z.B. waehrend die Reben wachsen).
+                            local primary = parallels[1]
+                            local par = {}
+                            for k = 2, #parallels do table.insert(par, parallels[k]) end
+                            local task = primary
+                            if #par > 0 then
+                                task = string.format("%s  [+ %s]", primary,
+                                    table.concat(par, ", "))
+                            end
+                            local iconCi = next(tally)
+                            table.insert(out, {
+                                fieldId = fid, task = task, primary = primary,
+                                parallel = par, actionable = false,
+                                iconFile = iconCi and self:_fruitIconFile(iconCi) or nil,
+                            })
                         end
                     end
                 end
