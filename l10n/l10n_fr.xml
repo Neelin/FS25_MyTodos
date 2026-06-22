@@ -52,6 +52,7 @@
 
         <!-- Fruit lifecycle (placeholder %s = fruit name) -->
         <text name="myTodos_fruit_withered"         text="%s : flétri"/>
+        <text name="myTodos_fruit_prune"            text="%s : tailler"/>
         <text name="myTodos_fruit_cut"              text="%s : coupé"/>
         <text name="myTodos_fruit_harvest"          text="%s : récolter"/>
         <text name="myTodos_fruit_forage"           text="%s : fourrage"/>

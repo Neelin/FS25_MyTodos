@@ -240,6 +240,13 @@ function MyTodos:derivePaddyTask(crop, growth)
     local withered = fruit.witheredState
 
     if withered ~= nil and g == withered then
+        -- Mehrjaehrige (Trauben/Oliven): verwelkt/dead = letzter Schritt im
+        -- Jahres-Zyklus -> mit der Astschere zurueckschneiden (Pruning), damit
+        -- die Reben/Baeume naechstes Jahr wieder austreiben. Saebare Kulturen
+        -- (Reis) bleiben beim generischen "Verwelkt".
+        if not crop.sowable then
+            return self:t("myTodos_fruit_prune", name), true
+        end
         return self:t("myTodos_fruit_withered", name), true
     end
     if minHarvest ~= nil and maxHarvest ~= nil and g >= minHarvest and g <= maxHarvest then
@@ -429,6 +436,13 @@ function MyTodos:_scanPerennialField(field, fid, crops, samplers, verbose)
                     if g >= minH and g <= maxH then harvestPx = harvestPx + c end
                 end
             end
+            -- Verwelkt/dead (witheredState, GRAPE=14/OLIVE=13) = letzter Schritt
+            -- im Jahres-Zyklus: mit der Astschere zurueckschneiden (Pruning).
+            local withered = crop.fruit.witheredState
+            local witheredPx = 0
+            if withered ~= nil and withered > 0 then
+                witheredPx = s.gh[withered] or 0
+            end
 
             -- Spray-Verteilung dieser Kultur auswerten: Anteil unter Max
             -- (Duengen, bis voll) + niedrigste vorhandene Stufe fuers Label.
@@ -463,17 +477,21 @@ function MyTodos:_scanPerennialField(field, fid, crops, samplers, verbose)
                     for _, k in ipairs(ks) do table.insert(parts, string.format("%d:%d", k, h[k])) end
                     return #parts > 0 and table.concat(parts, " ") or "-"
                 end
-                Logging.info("[MyTodos]   perennial %s/%s: total=%d harvestPx=%d spray[%s] lime[%s]",
-                    tostring(fid), name, s.total, harvestPx,
+                Logging.info("[MyTodos]   perennial %s/%s: total=%d harvestPx=%d witheredPx=%d spray[%s] lime[%s]",
+                    tostring(fid), name, s.total, harvestPx, witheredPx,
                     histStr(s.sprayHist), histStr(s.limeHist))
             end
 
-            -- Zeile bauen: Ernten hat Vorrang als primary, sonst erste Pflege.
-            -- Label immer crop-praefixiert, damit die Kulturen getrennt lesbar
-            -- sind (mehrere Zeilen auf derselben Feld-ID).
+            -- Zeile bauen: Reihenfolge im Jahres-Zyklus = Ernten > Schneiden
+            -- (verwelkt) > Pflege. Label immer crop-praefixiert, damit die
+            -- Kulturen getrennt lesbar sind (mehrere Zeilen auf derselben Feld-ID).
             local primary, actionable, parallel
             if harvestPx >= MyTodos.PERENNIAL_HARVEST_MIN_POINTS then
                 primary = self:t("myTodos_fruit_harvest", name)  -- "Trauben: Ernten"
+                actionable = true
+                parallel = care
+            elseif witheredPx >= MyTodos.PERENNIAL_HARVEST_MIN_POINTS then
+                primary = self:t("myTodos_fruit_prune", name)    -- "Trauben: Schneiden"
                 actionable = true
                 parallel = care
             elseif #care > 0 then
