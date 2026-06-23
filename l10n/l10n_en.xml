@@ -23,6 +23,9 @@
         <text name="myTodos_page_general"           text="General"/>
         <text name="myTodos_page_husbandry"         text="Animals"/>
         <text name="myTodos_page_fields"            text="Fields"/>
+        <text name="myTodos_foodmode_header"        text="Feed per barn"/>
+        <text name="myTodos_foodmode_auto"          text="Auto"/>
+        <text name="myTodos_foodmode_off"           text="Off"/>
         <text name="myTodos_setting_hudVisible"            text="Show HUD"/>
         <text name="myTodos_setting_hudShowHeader"         text="Show title bar"/>
         <text name="myTodos_setting_maxFieldLines"         text="Max. field rows"/>

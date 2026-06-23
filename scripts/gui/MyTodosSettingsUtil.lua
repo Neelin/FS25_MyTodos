@@ -205,6 +205,39 @@ function MyTodosSettingsUtil.populateToggleList(items, layout, prefabs, onToggle
     layout:invalidateLayout()
 end
 
+-- Variante fuer eine dynamische Liste von Multi-Option-Rows (Used vom
+-- Tiere-Block fuer den Per-Stall-Futter-Modus). Jedes item:
+--   { label=<Stallname>, state=<1-basierter Start-Index>,
+--     options={ {value=<modus>, text=<Anzeige>}, ... } }
+-- onChange wird mit (item, value) des gewaehlten Options-Eintrags aufgerufen.
+function MyTodosSettingsUtil.populateOptionList(items, layout, prefabs, onChange)
+    local alt = false
+    for _, item in ipairs(items) do
+        local row = prefabs.multi:clone(layout)
+        local setting = row:getDescendantByName("setting")
+        local label   = row:getDescendantByName("label")
+
+        if label ~= nil and label.setText ~= nil then
+            label:setText(item.label)
+        end
+        if setting ~= nil then
+            local texts = {}
+            for i, opt in ipairs(item.options) do texts[i] = opt.text end
+            if setting.setTexts ~= nil then setting:setTexts(texts) end
+            if setting.setState ~= nil then setting:setState(item.state or 1, false) end
+            setting.onClickCallback = function (_, state)
+                local opt = item.options[state]
+                if opt ~= nil then onChange(item, opt.value) end
+            end
+            FocusManager:loadElementFromCustomValues(setting)
+        end
+
+        applyAlternatingColor(row, alt)
+        alt = not alt
+    end
+    layout:invalidateLayout()
+end
+
 -- Hilft beim Aufraeumen: vor dem Re-Build alle Kinder einer ScrollingLayout
 -- entfernen (sonst akkumulieren wir Rows beim mehrfachen Oeffnen).
 function MyTodosSettingsUtil.clearLayout(layout)

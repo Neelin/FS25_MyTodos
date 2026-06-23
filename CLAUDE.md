@@ -119,8 +119,14 @@ alte Version weiter. `mtRescan` reloadet nur Daten, nicht Code.
 - `mtForceUpdate <feldNr>` — `field:updateState()` triggern + log
 - `mtFields` / `mtListOwned` / `mtFindField <feldNr>` — Feld-Listen
 - `mtIgnore <feldNr>` / `mtUnignore <feldNr>` — HUD-Filter
+- `mtFoodMode [<n> <auto|off|Typ>]` — Per-Stall-Futter-Modus auflisten/setzen
+  (z.B. Heu-Stall: `mtFoodMode 1 Heu` → trackt Heu, ignoriert TMR). Persistiert
+  pro Save+Farm via `placeable:getUniqueId()`, Fülltyp by-name.
 - `mtWhereAmI` / `mtFruitHere` — Position-/Frucht-Probe am Trecker
-- `mtProbe[Windrow|WindrowAt|Stones|Weed|Husbandry|HusbandryDeep|Pf|Paddy]` — Diagnose-Probes
+- `mtProbe[Windrow|WindrowAt|Stones|Weed|Husbandry|HusbandryDeep|FoodMode|Pf|Paddy]` — Diagnose-Probes
+  (`mtProbeFoodMode`: pro eigenem Stall die unterstützten Futter-fillTypes
+  (Name/Index/Level/Ratio + TMR-Flag) + stabile-ID-Kandidaten (rootNode-Position,
+  uniqueId, savegameId). Phase-1-Diagnose fürs Per-Stall-Futter-Modus-Feature.)
   (`mtProbePaddy`: Datenmodell für Kulturen auf owned-Farmland OHNE Field-
   Objekt — Reis, vermutlich auch Trauben/Oliven. Dumpt fieldType-Layer,
   owned-Farmlands ohne Field, Frucht-Growth am Standort, FruitType-Defs.

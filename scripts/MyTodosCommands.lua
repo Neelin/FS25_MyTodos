@@ -1121,6 +1121,79 @@ function MyTodos:consoleProbeHusbandryDeepCmd()
     return self:husbandryProbeDeep()
 end
 
+addConsoleCommand("mtProbeFoodMode",
+    "Probe per-husbandry food fillTypes + stable-id candidates (food-mode feature)",
+    "consoleProbeFoodModeCmd", MyTodos)
+function MyTodos:consoleProbeFoodModeCmd()
+    return self:foodModeProbe()
+end
+
+-- Per-Stall-Futter-Modus auflisten/setzen. Ohne Args: nummerierte Liste mit
+-- aktuellem Modus + waehlbaren Futtertypen. Mit <n> <modus>: setzen.
+-- modus = auto | off | fillType-Name (DRYGRASS_WINDROW) | lokalisiertes Label (Heu)
+addConsoleCommand("mtFoodMode",
+    "List/set per-husbandry food mode. Usage: mtFoodMode [<n> <auto|off|typeNameOrLabel>]",
+    "consoleFoodModeCmd", MyTodos)
+function MyTodos:consoleFoodModeCmd(nArg, modeArg)
+    local farmId = self.farmId or self:getLocalFarmId()
+    if farmId == nil then return "no farmId yet (load a save first)" end
+    local list = self:collectOwnedHusbandries(farmId)
+    if #list == 0 then return "no owned husbandries" end
+
+    -- Ohne Argumente: Liste + waehlbare Typen je Stall.
+    if nArg == nil then
+        Logging.info("[MyTodos] === food modes (set: mtFoodMode <n> <auto|off|type>) ===")
+        for i, entry in ipairs(list) do
+            local p = entry.placeable
+            local mode = self:getHusbandryFoodMode(self:_husbandryId(p))
+            Logging.info("[MyTodos] %d) %s  mode=%s",
+                i, tostring(entry.name), tostring(mode))
+            local opts = {}
+            for _, f in ipairs(self:_husbandrySupportedFeeds(p)) do
+                table.insert(opts, string.format("%s(%s)", f.label, f.name))
+            end
+            Logging.info("[MyTodos]      waehlbar: auto, off, %s",
+                table.concat(opts, ", "))
+        end
+        return "food modes listed - check log"
+    end
+
+    -- Setzen.
+    local n = tonumber(nArg)
+    if n == nil or list[n] == nil then
+        return string.format("invalid husbandry number '%s' (1..%d)",
+            tostring(nArg), #list)
+    end
+    if modeArg == nil then
+        return "usage: mtFoodMode <n> <auto|off|typeNameOrLabel>"
+    end
+    local entry = list[n]
+    local id = self:_husbandryId(entry.placeable)
+    if id == nil then return "could not resolve a stable id for this husbandry" end
+
+    local newMode
+    local m = string.lower(modeArg)
+    if m == "auto" or m == "off" then
+        newMode = m
+    else
+        for _, f in ipairs(self:_husbandrySupportedFeeds(entry.placeable)) do
+            if string.lower(f.name) == m or string.lower(f.label) == m then
+                newMode = f.name
+                break
+            end
+        end
+        if newMode == nil then
+            return string.format(
+                "'%s' is not a selectable feed of this husbandry (run mtFoodMode for the list)",
+                tostring(modeArg))
+        end
+    end
+
+    self:setHusbandryFoodMode(id, newMode)
+    return string.format("husbandry %d (%s) food mode -> %s",
+        n, tostring(entry.name), newMode)
+end
+
 -- Dumpt die PrecisionFarming-API-Surface (g_precisionFarming + Sub-Maps).
 -- Optional mit Feldnummer: samplet pH/N/soilType am Mittelpunkt des Feldes
 -- via diverser Methoden-Kandidaten -- so finden wir per Trial-and-Error

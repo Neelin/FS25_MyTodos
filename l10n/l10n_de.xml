@@ -23,6 +23,9 @@
         <text name="myTodos_page_general"           text="Allgemein"/>
         <text name="myTodos_page_husbandry"         text="Tiere"/>
         <text name="myTodos_page_fields"            text="Felder"/>
+        <text name="myTodos_foodmode_header"        text="Futter pro Stall"/>
+        <text name="myTodos_foodmode_auto"          text="Auto"/>
+        <text name="myTodos_foodmode_off"           text="Aus"/>
         <text name="myTodos_setting_hudVisible"            text="HUD anzeigen"/>
         <text name="myTodos_setting_hudShowHeader"         text="Titelleiste anzeigen"/>
         <text name="myTodos_setting_maxFieldLines"         text="Max. Zeilen Felder"/>

@@ -146,6 +146,7 @@ MyTodos.L10N_KEYS = {
     "myTodos_overview_col_extra",
     "myTodos_section_fields", "myTodos_section_animals",
     "myTodos_page_general", "myTodos_page_husbandry", "myTodos_page_fields",
+    "myTodos_foodmode_header", "myTodos_foodmode_auto", "myTodos_foodmode_off",
     "myTodos_setting_hudVisible", "myTodos_setting_hudShowHeader",
     "myTodos_setting_maxFieldLines", "myTodos_setting_maxHusbLines",
     "myTodos_setting_windrowThreshold", "myTodos_setting_stonesThreshold",
@@ -282,6 +283,11 @@ function MyTodos:onMapLoaded()
     -- Save-Reload + neue Saves nebeneinander. saveKey wird lazy beim
     -- ersten Scan berechnet (braucht farmId).
     self.ignoredFieldsAllSaves = {}
+    -- Per-Stall-Futter-Modus: pro (Savegame, FarmId) eine Tabelle
+    -- { [husbandryId] = mode }. mode ist "off" oder ein fillType-NAME
+    -- (z.B. "DRYGRASS_WINDROW"); "auto" (= Default-Heuristik) wird NICHT
+    -- gespeichert. husbandryId = placeable:getUniqueId() (stabil, move-proof).
+    self.husbandryFoodModesAllSaves = {}
     self.saveKey = nil
 
     self:loadSettings()
@@ -631,6 +637,47 @@ end
 
 function MyTodos:toggleFieldIgnored(fieldId)
     return self:setFieldIgnored(fieldId, not self:isFieldIgnored(fieldId))
+end
+
+-- Per-Stall-Futter-Modus -------------------------------------------------
+-- Analog zum Ignore-Bucket: pro (Savegame, FarmId) eine Tabelle
+-- { [husbandryId] = mode }. mode ist "off" oder ein fillType-NAME; "auto"
+-- ist der Default und wird nicht gespeichert (Eintrag fehlt = auto).
+
+function MyTodos:_currentFoodModeBucket()
+    local key = self:getSaveKey()
+    if key == nil then return nil end
+    if self.husbandryFoodModesAllSaves[key] == nil then
+        self.husbandryFoodModesAllSaves[key] = {}
+    end
+    return self.husbandryFoodModesAllSaves[key]
+end
+
+-- Liefert den konfigurierten Modus fuer einen Stall ("auto" wenn keiner
+-- gesetzt). id = placeable:getUniqueId().
+function MyTodos:getHusbandryFoodMode(id)
+    if id == nil then return "auto" end
+    local b = self:_currentFoodModeBucket()
+    if b == nil then return "auto" end
+    return b[id] or "auto"
+end
+
+-- Setzt den Modus. mode == "auto" loescht den Eintrag (Default). Persistiert
+-- + silent rescan, damit das HUD sofort folgt (wie setFieldIgnored).
+function MyTodos:setHusbandryFoodMode(id, mode)
+    if id == nil then return false end
+    local b = self:_currentFoodModeBucket()
+    if b == nil then return false end
+    if mode == nil or mode == "auto" then
+        b[id] = nil
+    else
+        b[id] = mode
+    end
+    self:saveSettings()
+    if self.farmId ~= nil then
+        self:scanHusbandries(false)
+    end
+    return true
 end
 
 function MyTodos:updateMouseCursor()
@@ -1028,9 +1075,31 @@ function MyTodos:loadSettings()
         idx = idx + 1
     end
 
+    -- Per-Stall-Futter-Modi: flache <foodMode save=".." farmId=".." id=".."
+    -- mode=".."/> Liste, gruppiert nach (save, farmId) wie die Ignore-Liste.
+    local foodCount = 0
+    idx = 0
+    while true do
+        local base = string.format("myTodos.foodMode(%d)", idx)
+        local save = getXMLString(xmlFile, base .. "#save")
+        if save == nil then break end
+        local farmIdStr = getXMLString(xmlFile, base .. "#farmId")
+        local idStr = getXMLString(xmlFile, base .. "#id")
+        local mode = getXMLString(xmlFile, base .. "#mode")
+        if farmIdStr ~= nil and idStr ~= nil and mode ~= nil and mode ~= "auto" then
+            local key = save .. "|" .. farmIdStr
+            if self.husbandryFoodModesAllSaves[key] == nil then
+                self.husbandryFoodModesAllSaves[key] = {}
+            end
+            self.husbandryFoodModesAllSaves[key][idStr] = mode
+            foodCount = foodCount + 1
+        end
+        idx = idx + 1
+    end
+
     delete(xmlFile)
-    Logging.info("[MyTodos] loaded settings: hudVisible=%s, %d ignored-field entries",
-        tostring(self.settings.hudVisible), count)
+    Logging.info("[MyTodos] loaded settings: hudVisible=%s, %d ignored-field entries, %d food-mode entries",
+        tostring(self.settings.hudVisible), count, foodCount)
 end
 
 function MyTodos:saveSettings()
@@ -1070,6 +1139,26 @@ function MyTodos:saveSettings()
                 setXMLString(xmlFile, base .. "#farmId", farmIdStr)
                 setXMLString(xmlFile, base .. "#id", tostring(fieldId))
                 outIdx = outIdx + 1
+            end
+        end
+    end
+
+    -- Per-Stall-Futter-Modi (alle Saves zurueckschreiben, wie die Ignore-Liste).
+    local fmIdx = 0
+    for saveKey, bucket in pairs(self.husbandryFoodModesAllSaves) do
+        local sep = saveKey:find("|", 1, true)
+        if sep ~= nil then
+            local saveName = saveKey:sub(1, sep - 1)
+            local farmIdStr = saveKey:sub(sep + 1)
+            for husbId, mode in pairs(bucket) do
+                if mode ~= nil and mode ~= "auto" then
+                    local base = string.format("myTodos.foodMode(%d)", fmIdx)
+                    setXMLString(xmlFile, base .. "#save", saveName)
+                    setXMLString(xmlFile, base .. "#farmId", farmIdStr)
+                    setXMLString(xmlFile, base .. "#id", tostring(husbId))
+                    setXMLString(xmlFile, base .. "#mode", tostring(mode))
+                    fmIdx = fmIdx + 1
+                end
             end
         end
     end

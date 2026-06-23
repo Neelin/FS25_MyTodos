@@ -157,6 +157,86 @@ function MyTodos:husbandryProbe()
         husbandryCount)
 end
 
+-- Phase-1-Probe fuer das Per-Stall-Futter-Modus-Feature. Dumpt pro eigenem
+-- Stall: (a) stabile-ID-Kandidaten -- Welt-Position des rootNode plus diverse
+-- moegliche Engine-IDs -- damit wir verifizieren WOMIT wir Staelle ueber
+-- Sessions hinweg stabil identifizieren (die placeables-Listenposition ist es
+-- NICHT); (b) alle unterstuetzten Futter-fillTypes (Name/Index/Level/Ratio) +
+-- ob der Stall TMR-faehig ist -- damit der spaetere Modus-Selektor genau die
+-- Typen anbietet die DIESER Stall frisst. Read-only Diagnose.
+function MyTodos:foodModeProbe()
+    Logging.info("[MyTodos] === food-mode probe ===")
+    local farmId = self.farmId or self:getLocalFarmId()
+    Logging.info("[MyTodos] my farmId = %s", tostring(farmId))
+    local list = self:collectOwnedHusbandries(farmId)
+    local tmrIdx = self:_tmrFillTypeIdx()
+    Logging.info("[MyTodos] %d owned husbandry(ies); FORAGE/TMR fillType idx = %s",
+        #list, tostring(tmrIdx))
+
+    for _, entry in ipairs(list) do
+        local p = entry.placeable
+        local nAnimals = self:_husbandryNumAnimals(p)
+        Logging.info("[MyTodos] --- husbandry listIdx=%d '%s' (animals=%d) ---",
+            entry.index, tostring(entry.name), nAnimals)
+
+        -- (a) Stabile-ID-Kandidaten
+        local rn = p.rootNode
+        if rn ~= nil then
+            local ok, x, _, z = pcall(getWorldTranslation, rn)
+            if ok then
+                Logging.info("[MyTodos]   pos=(%.1f, %.1f) -> key '%d_%d'",
+                    x, z, math.floor(x + 0.5), math.floor(z + 0.5))
+            end
+        end
+        local function show(label, v)
+            Logging.info("[MyTodos]   id-cand %-18s = %s", label, tostring(v))
+        end
+        show("uniqueId", rawget(p, "uniqueId"))
+        if type(p.getUniqueId) == "function" then
+            local ok, uid = pcall(p.getUniqueId, p)
+            show("getUniqueId()", ok and uid or "<err>")
+        end
+        show("currentSavegameId", rawget(p, "currentSavegameId"))
+        show("savegameId", rawget(p, "savegameId"))
+        show("configFileName", p.configFileName)
+
+        -- (b) Futter-Spec + unterstuetzte fillTypes
+        local food = p.spec_husbandryFood
+        if type(food) ~= "table" then
+            Logging.info("[MyTodos]   spec_husbandryFood: NONE (kein Trog-Futter)")
+        else
+            local usesTmr = tmrIdx ~= nil
+                and type(food.supportedFillTypes) == "table"
+                and food.supportedFillTypes[tmrIdx] == true
+            Logging.info("[MyTodos]   food.capacity=%s  TMR-faehig=%s",
+                tostring(food.capacity), tostring(usesTmr))
+            if type(food.supportedFillTypes) == "table" then
+                local ids = {}
+                for ft, on in pairs(food.supportedFillTypes) do
+                    if on then table.insert(ids, ft) end
+                end
+                table.sort(ids)
+                Logging.info("[MyTodos]   supportedFillTypes (%d):", #ids)
+                for _, ft in ipairs(ids) do
+                    local ftObj = g_fillTypeManager
+                        and g_fillTypeManager:getFillTypeByIndex(ft) or nil
+                    local rawName = ftObj and (ftObj.name or "?") or "?"
+                    local lvl = (type(food.fillLevels) == "table"
+                        and food.fillLevels[ft]) or 0
+                    local ratio = self:_foodFillTypeRatio(food, ft)
+                    Logging.info(
+                        "[MyTodos]     ft=%-3d name=%-18s label='%s' lvl=%s ratio=%s%s",
+                        ft, tostring(rawName), tostring(self:_fillTypeLabel(ft)),
+                        tostring(lvl),
+                        ratio and string.format("%.0f%%", ratio * 100) or "?",
+                        (ft == tmrIdx) and "  <-- TMR" or "")
+                end
+            end
+        end
+    end
+    return string.format("Food-mode probe done - %d husbandry(ies), check log", #list)
+end
+
 -- Tieferer Probe: dumpt die inneren Tabellen der Specs (fillLevels,
 -- supportedFillTypes, clusters etc.) und listet relevante Methoden der
 -- PlaceableHusbandry-Klasse via Metatable.
@@ -752,6 +832,63 @@ function MyTodos:_foodFillTypeRatio(food, fillTypeIdx)
     return lvl / cap
 end
 
+-- Stabile Stall-ID fuer die Futter-Modus-Persistenz. placeable:getUniqueId()
+-- ist save-stabil + move-proof (probe-bestaetigt, z.B.
+-- "placeableb99d...."). Fallback: gerundete rootNode-Position.
+function MyTodos:_husbandryId(p)
+    if p == nil then return nil end
+    if type(p.getUniqueId) == "function" then
+        local ok, id = pcall(p.getUniqueId, p)
+        if ok and type(id) == "string" and id ~= "" then return id end
+    end
+    if p.rootNode ~= nil then
+        local ok, x, _, z = pcall(getWorldTranslation, p.rootNode)
+        if ok then
+            return string.format("pos_%d_%d", math.floor(x + 0.5), math.floor(z + 0.5))
+        end
+    end
+    return nil
+end
+
+-- fillType-Index aus dem (Gross-)Namen, z.B. "DRYGRASS_WINDROW" -> 30.
+function MyTodos:_fillTypeIdxByName(name)
+    if name == nil or g_fillTypeManager == nil
+            or type(g_fillTypeManager.getFillTypeByName) ~= "function" then
+        return nil
+    end
+    local ok, ft = pcall(g_fillTypeManager.getFillTypeByName, g_fillTypeManager,
+        string.upper(name))
+    if ok and type(ft) == "table" and type(ft.index) == "number" then
+        return ft.index
+    end
+    return nil
+end
+
+-- Auswaehlbare Futtertypen eines Stalls fuer den Modus-Selektor: alle von der
+-- Food-Spec unterstuetzten fillTypes AUSSER den *_FAILED-Hilfstypen (engine-
+-- interne "gestrecktes/fehlgeschlagenes Futter"-States, kein waehlbares
+-- Futter). Liefert sortierte Liste { {idx, name, label}, ... }.
+function MyTodos:_husbandrySupportedFeeds(p)
+    local out = {}
+    local food = p and p.spec_husbandryFood
+    if type(food) ~= "table" or type(food.supportedFillTypes) ~= "table" then
+        return out
+    end
+    for ft, on in pairs(food.supportedFillTypes) do
+        if on and type(ft) == "number" then
+            local ftObj = g_fillTypeManager
+                and g_fillTypeManager:getFillTypeByIndex(ft) or nil
+            local name = ftObj and ftObj.name or ("ft" .. tostring(ft))
+            if not string.find(string.upper(name), "FAILED", 1, true) then
+                table.insert(out, { idx = ft, name = name,
+                    label = self:_fillTypeLabel(ft) })
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a.idx < b.idx end)
+    return out
+end
+
 -- Dringlichkeitsstufen fuer die HUD-Sortierung der Tier-Aufgaben (niedriger
 -- = dringlicher = weiter oben). Ein Stall erbt die Stufe seiner dringlichsten
 -- Aufgabe.
@@ -789,17 +926,36 @@ function MyTodos:deriveHusbandryTask(entry)
     local usesTmr = tmrIdx ~= nil and food ~= nil
             and type(food.supportedFillTypes) == "table"
             and food.supportedFillTypes[tmrIdx] == true
-    if usesTmr then
+    -- Per-Stall-Futter-Modus (Default "auto"):
+    --   "off"          -> kein Futter-Reminder fuer diesen Stall
+    --   <fillTypeName> -> genau diesen Typ tracken (z.B. nur Heu, TMR ignorieren)
+    --   "auto"         -> bisherige Heuristik (TMR bei TMR-faehigen, sonst Aggregat)
+    local foodMode = self:getHusbandryFoodMode(self:_husbandryId(p))
+    local foodThr = self:_pctThreshold("foodThreshold", 20) / 100
+    if foodMode == "off" then
+        -- nichts tracken
+    elseif foodMode ~= "auto" then
+        -- Nur tracken wenn der Stall den Typ wirklich unterstuetzt (gegen
+        -- veraltete Modi nach Stall-Umbau -> sonst Dauer-"0%").
+        local ftIdx = self:_fillTypeIdxByName(foodMode)
+        local supported = ftIdx ~= nil and food ~= nil
+                and type(food.supportedFillTypes) == "table"
+                and food.supportedFillTypes[ftIdx] == true
+        local r = supported and self:_foodFillTypeRatio(food, ftIdx) or nil
+        if r ~= nil and r < foodThr then
+            table.insert(parts,
+                string.format("%s %.0f%%", self:_fillTypeLabel(ftIdx), r * 100))
+            priority = math.min(priority, MyTodos.HUSB_PRIO_SUPPLY)
+        end
+    elseif usesTmr then
         local r = self:_foodFillTypeRatio(food, tmrIdx)
-        if r ~= nil
-                and r < self:_pctThreshold("foodThreshold", 20) / 100 then
+        if r ~= nil and r < foodThr then
             table.insert(parts, self:t("myTodos_husb_tmr", r * 100))
             priority = math.min(priority, MyTodos.HUSB_PRIO_SUPPLY)
         end
     else
         local foodRatio = self:_specFillRatio(p, food, "capacity")
-        if foodRatio ~= nil
-                and foodRatio < self:_pctThreshold("foodThreshold", 20) / 100 then
+        if foodRatio ~= nil and foodRatio < foodThr then
             table.insert(parts, self:t("myTodos_husb_food", foodRatio * 100))
             priority = math.min(priority, MyTodos.HUSB_PRIO_SUPPLY)
         end
